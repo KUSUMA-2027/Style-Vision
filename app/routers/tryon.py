@@ -11,6 +11,7 @@ Implements the client's critical requirements:
 """
 from datetime import datetime, timezone
 import logging
+import os
 import uuid
 from typing import Optional
 
@@ -34,6 +35,7 @@ from app.services.tryon_service import (
     synthesize_outfit_tryon,
     resolve_person_image_for_user,
     _get_or_create_person_image,
+    generate_depth_variants,
 )
 from app.services.image_registry import (
     register_stage_result,
@@ -135,6 +137,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
 
     # Replacement-aware source resolution (one outfit at a time)
     person_img = None
+    source_doc_id: Optional[str] = None
     replay_docs: list = []
     dropped = False
     try:
@@ -143,6 +146,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
         )
         if source_doc is not None:
             person_img, _url = load_image_from_doc(source_doc)
+            source_doc_id = source_doc.get("image_id")
     except Exception as exc:
         logger.warning("[Outfit] replay resolution failed: %s", exc)
 
@@ -178,7 +182,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
             "status": TryOnStatus.completed,
             "mode": intermediate.get("mode", TryOnMode.prototype),
             "source": request.source,
-            "parent_image_id": request.person_image_id,
+            "parent_image_id": source_doc_id or request.person_image_id,
             "result_image_id": tryon_id,
             "original_image_url": intermediate.get("original_image_url") or "",
             "garment_image_url": intermediate.get("garment_image_url"),
@@ -191,7 +195,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
                 user_id=user_id,
                 image_id=tryon_id,
                 stage="outfit",
-                parent_image_id=request.person_image_id,
+                parent_image_id=source_doc_id or request.person_image_id,
                 tryon_id=tryon_id,
                 url=result_url,
                 metadata={
@@ -222,9 +226,29 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
         user_id=user_id,
     )
 
-    job_record = {**result, "user_id": user_id, "garment_name": garment_name}
+    # Auto-generate depth tilt variant for the result
+    tilted_url = None
+    depth_url = None
+    if result.get("status") == TryOnStatus.completed and result.get("result_image_url"):
+        rel = result["result_image_url"].lstrip("/").replace("/", os.sep)
+        result_path = os.path.join(os.getcwd(), rel)
+        if os.path.isfile(result_path):
+            tilted_url, depth_url = await generate_depth_variants(
+                result_image_path=result_path,
+                user_id=user_id,
+                image_id=result.get("result_image_id") or tryon_id,
+                tryon_id=result.get("tryon_id") or tryon_id,
+            )
+
+    job_record = {
+        **result,
+        "user_id": user_id,
+        "garment_name": garment_name,
+        "tilted_image_url": tilted_url,
+        "depth_map_url": depth_url,
+    }
     await _save_job(job_record)
-    return OutfitTryOnResponse(**result)
+    return OutfitTryOnResponse(**job_record)
 
 
 # ── Accessories ───────────────────────────────────────────────────────────────
@@ -361,6 +385,20 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
     except Exception as reg_err:
         logger.warning("[Accessory] Failed to register result image: %s", reg_err)
 
+    # Auto-generate depth tilt variant for the result
+    tilted_url = None
+    depth_url = None
+    if result_url:
+        rel = result_url.lstrip("/").replace("/", os.sep)
+        result_path = os.path.join(os.getcwd(), rel)
+        if os.path.isfile(result_path):
+            tilted_url, depth_url = await generate_depth_variants(
+                result_image_path=result_path,
+                user_id=user_id,
+                image_id=result_image_id,
+                tryon_id=tryon_id,
+            )
+
     job_record = {
         "tryon_id": tryon_id,
         "user_id": user_id,
@@ -372,6 +410,8 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
         "result_image_id": result_image_id,
         "original_image_url": source_url,
         "result_image_url": result_url,
+        "tilted_image_url": tilted_url,
+        "depth_map_url": depth_url,
         "closeup_original_image_url": closeup_orig_url,
         "closeup_result_image_url": closeup_result_url,
         "created_at": created_at,
@@ -387,6 +427,8 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
         result_image_id=result_image_id,
         original_image_url=source_url,
         result_image_url=result_url,
+        tilted_image_url=tilted_url,
+        depth_map_url=depth_url,
         closeup_original_image_url=closeup_orig_url,
         closeup_result_image_url=closeup_result_url,
         created_at=created_at,
@@ -536,6 +578,20 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
     except Exception as reg_err:
         logger.warning("[Makeup] Failed to register result image: %s", reg_err)
 
+    # Auto-generate depth tilt variant for the result
+    tilted_url = None
+    depth_url = None
+    if result_url:
+        rel = result_url.lstrip("/").replace("/", os.sep)
+        result_path = os.path.join(os.getcwd(), rel)
+        if os.path.isfile(result_path):
+            tilted_url, depth_url = await generate_depth_variants(
+                result_image_path=result_path,
+                user_id=user_id,
+                image_id=result_image_id,
+                tryon_id=tryon_id,
+            )
+
     job_record = {
         "tryon_id": tryon_id,
         "user_id": user_id,
@@ -550,6 +606,8 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
         "result_image_id": result_image_id,
         "original_image_url": source_url,
         "result_image_url": result_url,
+        "tilted_image_url": tilted_url,
+        "depth_map_url": depth_url,
         "closeup_original_image_url": closeup_orig_url,
         "closeup_result_image_url": closeup_result_url,
         "created_at": created_at,
@@ -687,6 +745,20 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
     except Exception as reg_err:
         logger.warning("[Hairstyle] Failed to register result image: %s", reg_err)
 
+    # Auto-generate depth tilt variant for the result
+    tilted_url = None
+    depth_url = None
+    if result_url:
+        rel = result_url.lstrip("/").replace("/", os.sep)
+        result_path = os.path.join(os.getcwd(), rel)
+        if os.path.isfile(result_path):
+            tilted_url, depth_url = await generate_depth_variants(
+                result_image_path=result_path,
+                user_id=user_id,
+                image_id=result_image_id,
+                tryon_id=tryon_id,
+            )
+
     job_record = {
         "tryon_id": tryon_id,
         "user_id": user_id,
@@ -698,6 +770,8 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
         "result_image_id": result_image_id,
         "original_image_url": source_url,
         "result_image_url": result_url,
+        "tilted_image_url": tilted_url,
+        "depth_map_url": depth_url,
         "closeup_original_image_url": closeup_orig_url,
         "closeup_result_image_url": closeup_result_url,
         "created_at": created_at,

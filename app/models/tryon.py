@@ -42,6 +42,8 @@ class OutfitTryOnResponse(BaseModel):
     original_image_url: str
     garment_image_url: str
     result_image_url: Optional[str] = None
+    tilted_image_url: Optional[str] = None
+    depth_map_url: Optional[str] = None
     processing_note: Optional[str] = None
     error: Optional[str] = None
     created_at: datetime
@@ -68,6 +70,8 @@ class AccessoryTryOnResponse(BaseModel):
     result_image_id: Optional[str] = None
     original_image_url: Optional[str] = None
     result_image_url: Optional[str] = None
+    tilted_image_url: Optional[str] = None
+    depth_map_url: Optional[str] = None
     closeup_original_image_url: Optional[str] = None
     closeup_result_image_url: Optional[str] = None
     error: Optional[str] = None
@@ -96,6 +100,8 @@ class MakeupTryOnResponse(BaseModel):
     result_image_id: Optional[str] = None
     original_image_url: Optional[str] = None
     result_image_url: Optional[str] = None
+    tilted_image_url: Optional[str] = None
+    depth_map_url: Optional[str] = None
     closeup_original_image_url: Optional[str] = None
     closeup_result_image_url: Optional[str] = None
     color_hex: Optional[str] = None
@@ -122,6 +128,8 @@ class HairstyleTryOnResponse(BaseModel):
     result_image_id: Optional[str] = None
     original_image_url: Optional[str] = None
     result_image_url: Optional[str] = None
+    tilted_image_url: Optional[str] = None
+    depth_map_url: Optional[str] = None
     closeup_original_image_url: Optional[str] = None
     closeup_result_image_url: Optional[str] = None
     error: Optional[str] = None

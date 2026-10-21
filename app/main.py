@@ -74,6 +74,12 @@ if os.path.isdir(settings.upload_dir):
 if os.path.isdir(settings.catalogue_dir):
     app.mount("/catalogue", StaticFiles(directory=settings.catalogue_dir), name="catalogue")
 
+# ── Static file serving for depth tilt outputs ──────────────────────────
+depth_dir = os.path.join(settings.upload_dir, "depth")
+if os.path.isdir(depth_dir) or True:
+    os.makedirs(depth_dir, exist_ok=True)
+    app.mount("/uploads/depth", StaticFiles(directory=depth_dir), name="depth")
+
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 from app.routers import auth, upload, catalogue, tryon, history, profile, admin, wardrobe

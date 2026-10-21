@@ -24,10 +24,68 @@ from app.services.image_registry import (
     resolve_person_image as registry_resolve_person_image,
     register_stage_result,
 )
+from app.services.depth_service import apply_depth_tilt, save_tilt_result
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 TRYON_OUTPUT_DIR = os.path.join(settings.upload_dir, "tryon")
+DEPTH_OUTPUT_DIR = os.path.join(settings.upload_dir, "depth")
+
+
+async def generate_depth_variants(
+    result_image_path: str,
+    user_id: str,
+    image_id: str,
+    tryon_id: str,
+    angle_deg: float = 8.0,
+    intensity: float = 0.12,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Generate a 2.5D tilted version and depth map for a try-on result image.
+    Never raises — failures are logged and return (None, None).
+    """
+    try:
+        from PIL import Image
+        image = Image.open(result_image_path).convert("RGBA")
+        tilted_img, depth_vis = apply_depth_tilt(
+            image, angle_deg=angle_deg, intensity=intensity
+        )
+
+        os.makedirs(DEPTH_OUTPUT_DIR, exist_ok=True)
+        tilt_filename = f"{image_id}_tilt.png"
+        depth_filename = f"{image_id}_depth.png"
+        tilt_path = os.path.join(DEPTH_OUTPUT_DIR, tilt_filename)
+        depth_path = os.path.join(DEPTH_OUTPUT_DIR, depth_filename)
+
+        save_tilt_result(tilted_img, tilt_path)
+        depth_vis.save(depth_path)
+
+        tilt_url = f"/uploads/depth/{tilt_filename}"
+        depth_url = f"/uploads/depth/{depth_filename}"
+
+        # Register in image registry
+        try:
+            await register_stage_result(
+                user_id=user_id,
+                image_id=f"{image_id}_tilt",
+                stage="depth_tilt",
+                parent_image_id=image_id,
+                tryon_id=tryon_id,
+                url=tilt_url,
+                metadata={
+                    "source_image_id": image_id,
+                    "angle_deg": angle_deg,
+                    "intensity": intensity,
+                    "depth_map_url": depth_url,
+                },
+            )
+        except Exception as reg_err:
+            logger.warning("[Depth] Registry registration skipped: %s", reg_err)
+
+        return tilt_url, depth_url
+    except Exception as exc:
+        logger.warning("[Depth] Depth tilt generation failed: %s", exc)
+        return None, None
 
 
 async def resolve_person_image_for_user(
@@ -662,8 +720,8 @@ async def synthesize_outfit_tryon(
             logger.warning("❌ Replicate serverless tryon failed (%s).", err_msg)
             note = f"Serverless notice: {err_msg[:120]}."
 
-    # Step 4B: Try Real CatVTON Neural Diffusion if configured
-    if composite is None and settings.tryon_mode == "catvton" and settings.catvton_endpoint:
+    # Step 4B: Try Real CatVTON Neural Diffusion if configured (also fallback when Replicate failed)
+    if composite is None and settings.catvton_endpoint:
         try:
             logger.warning("🚀 CatVTON: Connecting to Cloud GPU at %s (cloth_type=%s)", settings.catvton_endpoint, cloth_type)
             cloud_result = await _call_catvton_cloud(
