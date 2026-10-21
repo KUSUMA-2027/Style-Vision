@@ -1,0 +1,47 @@
+# ============================================================
+# StyleVision Backend — Python Dependencies
+# Install with:  python -m pip install -r requirements.txt
+# ============================================================
+
+# --- Web framework ---
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# --- Async MongoDB driver ---
+# motor 3.7.1 is the latest; pymongo version is resolved by pip automatically
+motor==3.7.1
+
+# --- Auth & security ---
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.12
+email-validator>=2.0.0
+
+# --- Image processing (CPU-compatible) ---
+Pillow==11.0.0
+numpy==2.1.3
+opencv-python==4.10.0.84
+mediapipe==0.10.18
+
+# --- Configuration ---
+python-dotenv==1.0.1
+pydantic-settings==2.6.1
+
+# --- Cloud GPU try-on (Replicate IDM-VTON serverless) ---
+replicate>=0.26.0
+
+# --- Utilities ---
+aiofiles==24.1.0
+python-magic-bin==0.4.14; sys_platform == "win32"
+python-magic==0.4.27; sys_platform != "win32"
+
+# ============================================================
+# Optional — GPU-only dependencies (CatVTON)
+# Uncomment and install separately on a CUDA-enabled machine:
+# torch==2.4.0  (install via pytorch.org with CUDA 12.1 build)
+# diffusers==0.30.3
+# transformers==4.44.2
+# accelerate==0.34.2
+# huggingface-hub==0.25.2
+# ============================================================

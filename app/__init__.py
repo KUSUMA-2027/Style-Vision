@@ -1,0 +1,3 @@
+"""
+StyleVision Backend — Package initializer
+"""
