@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "StyleVision",
+    "slug": "stylevision",
+    "version": "1.0.0",
+    "scheme": "stylevision",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1A0A2E"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.stylevision.app"
+    },
+    "android": {
+      "package": "com.stylevision.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#1A0A2E",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "experiments": {
+      "typedRoutes": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-splash-screen",
+      "expo-web-browser",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "StyleVision needs access to your photo library to select photos for virtual try-on.",
+          "cameraPermission": "StyleVision needs access to your camera to take photos for virtual try-on."
+        }
+      ],
+      "expo-sharing"
+    ]
+  }
+}

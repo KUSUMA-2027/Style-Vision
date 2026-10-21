@@ -1,0 +1,387 @@
+/**
+ * StyleVision — Complete Look Screen
+ * Final stage of the styling workflow: displays the combined result of all
+ * applied stages (outfit → accessories → makeup → hairstyle), lets the user
+ * revisit any stage, save the look, download it, or start a new session.
+ */
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  Image,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
+import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
+import { Header } from '@/components/ui/Header';
+import { Card } from '@/components/ui/Card';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { getApiBaseUrl, api } from '@/services/api';
+import {
+  useStylingSession,
+  STAGE_ORDER,
+  STAGE_LABEL,
+  STAGE_ROUTE,
+  type Stage,
+} from '@/services/session';
+
+const STAGE_ICON: Record<Stage, string> = {
+  outfit: '👗',
+  accessories: '💎',
+  makeup: '💄',
+  hairstyle: '💇',
+};
+
+export default function CompleteLookScreen() {
+  const router = useRouter();
+  const session = useStylingSession();
+  const baseUrl = getApiBaseUrl();
+
+  const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const appliedStages = STAGE_ORDER.filter((s) => session.stages[s]);
+  const hasLook = Boolean(session.current && appliedStages.length > 0);
+  const finalImageUrl = session.current?.url
+    ? session.current.url.startsWith('http')
+      ? session.current.url
+      : `${baseUrl}${session.current.url}`
+    : null;
+
+  const resolvedTryonId =
+    [...appliedStages].reverse().map((s) => session.stages[s]!.tryonId).find(Boolean) || '';
+
+  const handleSave = async () => {
+    if (!resolvedTryonId) return;
+    setSaving(true);
+    try {
+      const stageMeta = appliedStages.map((s) => ({
+        stage: s,
+        tryon_id: session.stages[s]!.tryonId,
+        result_image_id: session.stages[s]!.resultImageId,
+        result_image_url: session.stages[s]!.resultUrl,
+        title: session.stages[s]!.title,
+      }));
+      await api.history.save(resolvedTryonId, 'My Complete Look', {
+        base_image_id: session.base?.image_id,
+        final_image_id: session.current?.image_id,
+        stages: stageMeta,
+      });
+      Alert.alert('Look Saved! 💎', 'Your complete look is now in your Atelier Lookbook.');
+    } catch (err: any) {
+      Alert.alert('Save Failed', err.message || 'Could not save this look right now.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!finalImageUrl) return;
+    setDownloading(true);
+    try {
+      if (Platform.OS === 'web') {
+        window.open(finalImageUrl, '_blank');
+        return;
+      }
+      const perm = await MediaLibrary.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission Needed', 'Please allow photo library access to download your look.');
+        return;
+      }
+      const download = await FileSystem.downloadAsync(
+        finalImageUrl,
+        `${FileSystem.cacheDirectory}stylevision-complete-look.png`
+      );
+      await MediaLibrary.saveToLibraryAsync(download.uri);
+      Alert.alert('Downloaded! 📥', 'Your complete look has been saved to your photo library.');
+    } catch (err: any) {
+      Alert.alert('Download Failed', err.message || 'Could not download the image right now.');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!finalImageUrl) return;
+    try {
+      if (Platform.OS === 'web') {
+        window.open(finalImageUrl, '_blank');
+        return;
+      }
+      if (await Sharing.isAvailableAsync()) {
+        const download = await FileSystem.downloadAsync(
+          finalImageUrl,
+          `${FileSystem.cacheDirectory}stylevision-complete-look.png`
+        );
+        await Sharing.shareAsync(download.uri, { mimeType: 'image/png' });
+      }
+    } catch (err: any) {
+      Alert.alert('Share Failed', err.message || 'Could not share the image right now.');
+    }
+  };
+
+  const handleStartNew = () => {
+    Alert.alert(
+      'Start a New Look?',
+      'This clears the current styling session. Your saved looks remain in your Lookbook.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start New',
+          style: 'destructive',
+          onPress: () => {
+            session.resetSession();
+            router.push('/upload');
+          },
+        },
+      ]
+    );
+  };
+
+  if (!session.base && !hasLook) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <Header title="Complete Look" showBack />
+        <EmptyState
+          icon="✨"
+          title="No Styling Session Yet"
+          description="Upload a portrait and style your outfit, accessories, makeup, and hairstyle — then return here for the combined reveal."
+          actionTitle="Start Styling"
+          onAction={() => router.push('/upload')}
+        />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Badge label="Final Reveal" variant="primary" style={styles.badge} />
+          <Text style={styles.title}>Your Complete Look</Text>
+          <Text style={styles.subtitle}>
+            {appliedStages.length === 0
+              ? 'No stages applied yet — start with an outfit.'
+              : `${appliedStages.length} of 4 stages applied`}
+          </Text>
+        </View>
+
+        {/* Combined result preview */}
+        <Card style={styles.previewCard} variant="elevated">
+          {finalImageUrl ? (
+            <Image source={{ uri: finalImageUrl }} style={styles.previewImage} resizeMode="cover" />
+          ) : (
+            <View style={styles.previewPlaceholder}>
+              <Text style={styles.previewPlaceholderIcon}>🪞</Text>
+              <Text style={styles.previewPlaceholderText}>Apply stages to reveal your look</Text>
+            </View>
+          )}
+        </Card>
+
+        {/* Stage checklist — tap any stage to revisit & regenerate */}
+        <Text style={styles.sectionHeading}>Styling Stages</Text>
+        <Card style={styles.stagesCard} variant="outlined">
+          {STAGE_ORDER.map((stage) => {
+            const result = session.stages[stage];
+            const done = Boolean(result);
+            return (
+              <TouchableOpacity
+                key={stage}
+                style={styles.stageRow}
+                onPress={() => router.push(STAGE_ROUTE[stage] as any)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.stageIcon}>{STAGE_ICON[stage]}</Text>
+                <View style={styles.stageInfo}>
+                  <Text style={styles.stageName}>{STAGE_LABEL[stage]}</Text>
+                  <Text style={styles.stageDetail} numberOfLines={1}>
+                    {done ? result!.title : 'Not applied yet — tap to style'}
+                  </Text>
+                </View>
+                <Badge
+                  label={done ? '✓ Applied' : 'Add'}
+                  variant={done ? 'success' : 'muted'}
+                />
+              </TouchableOpacity>
+            );
+          })}
+        </Card>
+        <Text style={styles.revisitNote}>
+          Revisit any stage to regenerate it — the result will be rebuilt on top of your latest
+          combined look.
+        </Text>
+
+        {/* Actions */}
+        <View style={styles.actions}>
+          <Button
+            title={saving ? 'Saving...' : 'Save to Lookbook 💜'}
+            variant="primary"
+            size="lg"
+            onPress={handleSave}
+            disabled={saving || !hasLook}
+            loading={saving}
+            style={styles.actionBtn}
+          />
+          <View style={styles.rowBtns}>
+            <Button
+              title={downloading ? 'Downloading...' : 'Download 📥'}
+              variant="outline"
+              size="md"
+              onPress={handleDownload}
+              disabled={downloading || !hasLook}
+              loading={downloading}
+              style={styles.halfBtn}
+            />
+            <Button
+              title="Share"
+              variant="outline"
+              size="md"
+              onPress={handleShare}
+              disabled={!hasLook}
+              style={styles.halfBtn}
+            />
+          </View>
+          <Button
+            title="Start a New Look"
+            variant="ghost"
+            size="md"
+            onPress={handleStartNew}
+            style={styles.actionBtn}
+          />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  content: {
+    padding: Spacing.xl,
+    paddingBottom: Spacing.xxxl * 2,
+  },
+  header: {
+    marginBottom: Spacing.lg,
+  },
+  badge: {
+    marginBottom: Spacing.sm,
+  },
+  title: {
+    fontSize: Typography.sizes.xl,
+    fontWeight: Typography.weights.heavy,
+    color: Colors.textPrimary,
+  },
+  subtitle: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  previewCard: {
+    backgroundColor: Colors.surfaceCard,
+    padding: Spacing.md,
+    marginBottom: Spacing.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  previewImage: {
+    width: '100%',
+    height: 420,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.surface,
+  },
+  previewPlaceholder: {
+    width: '100%',
+    height: 300,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewPlaceholderIcon: {
+    fontSize: 48,
+    marginBottom: Spacing.sm,
+  },
+  previewPlaceholderText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.textMuted,
+  },
+  sectionHeading: {
+    fontSize: Typography.sizes.sm,
+    fontWeight: Typography.weights.bold,
+    color: Colors.primaryLight,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: Spacing.sm,
+  },
+  stagesCard: {
+    backgroundColor: Colors.surface,
+    padding: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  stageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
+  },
+  stageIcon: {
+    fontSize: 22,
+    marginRight: Spacing.md,
+  },
+  stageInfo: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  stageName: {
+    fontSize: Typography.sizes.sm,
+    fontWeight: Typography.weights.bold,
+    color: Colors.textPrimary,
+  },
+  stageDetail: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  revisitNote: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginBottom: Spacing.xl,
+    lineHeight: 16,
+  },
+  actions: {
+    gap: Spacing.md,
+  },
+  actionBtn: {
+    alignSelf: 'stretch',
+  },
+  rowBtns: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  halfBtn: {
+    flex: 1,
+  },
+});
