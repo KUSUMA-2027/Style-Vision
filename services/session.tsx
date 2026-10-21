@@ -116,7 +116,17 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
               mode: s.metadata?.mode,
               appliedAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
             };
-            restoredCurrent = { image_id: s.image_id, url: s.url };
+          }
+        }
+        // The true current image is the server's latest stage result overall
+        // (critical when items were re-applied / replaced out of order)
+        if (res?.current_image?.url && res?.current_image?.image_id) {
+          restoredCurrent = { image_id: res.current_image.image_id, url: res.current_image.url };
+        } else {
+          // Fallback: deepest applied stage in pipeline order
+          for (const stage of STAGE_ORDER) {
+            const s = restoredStages[stage];
+            if (s) restoredCurrent = { image_id: s.resultImageId || s.tryonId, url: s.resultUrl };
           }
         }
       } catch {
