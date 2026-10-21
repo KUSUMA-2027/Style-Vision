@@ -1,47 +1,48 @@
 # ============================================================
 # StyleVision Backend — Python Dependencies
 # Install with:  python -m pip install -r requirements.txt
+#
+# NOTE: Requires Python 3.13+ (mediapipe 0.10.30+ wheels).
+# Pins reflect the actual verified working environment.
 # ============================================================
 
 # --- Web framework ---
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
+fastapi==0.143.3
+uvicorn==0.54.0
+websockets==17.2
 
-# --- Async MongoDB driver ---
-# motor 3.7.1 is the latest; pymongo version is resolved by pip automatically
+# --- Async MongoDB driver + zero-setup dev fallback ---
 motor==3.7.1
+mongomock-motor==0.0.36
 
 # --- Auth & security ---
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
-python-multipart==0.0.12
-email-validator>=2.0.0
+python-jose==3.5.0
+ecdsa==0.19.2
+rsa==4.9.1
+passlib==1.7.4
+bcrypt==5.0.0
+python-multipart==0.0.32
+email-validator==2.3.0
 
 # --- Image processing (CPU-compatible) ---
-Pillow==11.0.0
-numpy==2.1.3
-opencv-python==4.10.0.84
-mediapipe==0.10.18
+pillow==13.0.0
+numpy==2.5.4
+opencv-contrib-python==5.0.0.93
+mediapipe==0.10.35
 
 # --- Configuration ---
-python-dotenv==1.0.1
-pydantic-settings==2.6.1
+python-dotenv==1.2.4
+pydantic-settings==2.16.0
 
 # --- Cloud GPU try-on (Replicate IDM-VTON serverless) ---
-replicate>=0.26.0
+replicate==1.0.7
+httpx==0.28.1
 
 # --- Utilities ---
-aiofiles==24.1.0
-python-magic-bin==0.4.14; sys_platform == "win32"
-python-magic==0.4.27; sys_platform != "win32"
+aiofiles==25.1.0
 
 # ============================================================
-# Optional — GPU-only dependencies (CatVTON)
-# Uncomment and install separately on a CUDA-enabled machine:
-# torch==2.4.0  (install via pytorch.org with CUDA 12.1 build)
-# diffusers==0.30.3
-# transformers==4.44.2
-# accelerate==0.34.2
-# huggingface-hub==0.25.2
+# Optional — GPU-only dependencies (CatVTON on Colab/Kaggle)
+# Install separately on the CUDA notebook, not on the backend:
+# torch, diffusers==0.27.2, transformers, accelerate
 # ============================================================
