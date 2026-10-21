@@ -585,6 +585,8 @@ async def synthesize_outfit_tryon(
     garment_category: Optional[str] = None,
     explicit_cloth_type: Optional[str] = None,
     user_id: Optional[str] = None,
+    person_image_override: Optional[Image.Image] = None,
+    register_result: bool = True,
 ) -> dict:
     """
     Execute virtual clothing try-on pipeline:
@@ -592,14 +594,24 @@ async def synthesize_outfit_tryon(
     2. If TRYON_MODE=catvton and endpoint set: calls CatVTON diffusion pipeline on GPU
     3. If prototype mode or fallback: performs anatomical torso scaling with keyed garment background
     4. Saves output, registers the result image for stage chaining, and returns job record
+
+    person_image_override: replay mode — composite onto this in-memory image instead
+                           of resolving person_image_id from the registry.
+    register_result=False: replay mode — do not save/register intermediate results;
+                           the composite is returned via 'composite_image'.
     """
     os.makedirs(TRYON_OUTPUT_DIR, exist_ok=True)
     tryon_id = f"tryon-outfit-{uuid.uuid4().hex[:10]}"
 
     # Step 1: Load Person (registry-aware: previous stage results resolve here)
-    person_img, person_url, parent_image_id = await resolve_person_image_for_user(
-        user_id or "usr-demo-001", person_image_id
-    )
+    if person_image_override is not None:
+        person_img = person_image_override.convert("RGBA")
+        person_url = ""
+        parent_image_id = None
+    else:
+        person_img, person_url, parent_image_id = await resolve_person_image_for_user(
+            user_id or "usr-demo-001", person_image_id
+        )
     pw, ph = person_img.size
 
     # Step 2: Determine garment type (used by both CatVTON and prototype)
@@ -811,7 +823,23 @@ async def synthesize_outfit_tryon(
     )
     draw.text((16, ph - 26), mode_label, fill=(180, 160, 230, 255))
 
-    # Step 6: Save composite image
+    # Step 6: Save composite image + register for chaining (skipped in replay mode)
+    if not register_result:
+        return {
+            "tryon_id": tryon_id,
+            "status": TryOnStatus.completed,
+            "mode": mode,
+            "source": source,
+            "parent_image_id": None,
+            "result_image_id": tryon_id,
+            "original_image_url": "",
+            "garment_image_url": garment_url,
+            "result_image_url": None,
+            "composite_image": composite,
+            "processing_note": note,
+            "created_at": datetime.now(timezone.utc),
+        }
+
     result_filename = f"{tryon_id}.png"
     result_path = os.path.join(TRYON_OUTPUT_DIR, result_filename)
     composite.save(result_path, format="PNG")

@@ -141,6 +141,14 @@ def _load_pil_from_doc(doc: dict) -> Optional[Tuple[Image.Image, str]]:
         return None
 
 
+def load_image_from_doc(doc: dict) -> Tuple[Optional[Image.Image], Optional[str]]:
+    """Public wrapper: load a registry doc's image from disk. Returns (img, url) or (None, None)."""
+    result = _load_pil_from_doc(doc)
+    if result is None:
+        return None, None
+    return result
+
+
 async def resolve_person_image(
     user_id: str,
     image_ref: Optional[str],
@@ -229,13 +237,109 @@ async def get_chain(user_id: str, image_id: str) -> List[dict]:
     return chain
 
 
+async def get_chain_docs(user_id: str, image_ref: Optional[str]) -> List[dict]:
+    """
+    Full registry documents for the chain that produced `image_ref`,
+    ordered ROOT (original portrait) → TIP (requested image).
+    Empty list if the reference is not registered.
+    """
+    docs: List[dict] = []
+    seen = set()
+    current_id = image_ref
+    db = get_database()
+
+    while current_id and current_id not in seen and len(seen) < 25:
+        seen.add(current_id)
+        doc = await db["images"].find_one(
+            {"user_id": user_id, "$or": [{"image_id": current_id}, {"tryon_id": current_id}]}
+        )
+        if not doc:
+            break
+        docs.append(doc)
+        current_id = doc.get("parent_image_id")
+
+    docs.reverse()
+    return docs
+
+
+def _slot_of_doc(stage: str, doc: dict) -> Optional[str]:
+    """The replaceable slot value of a stage-result document (e.g. accessory subcategory)."""
+    meta = doc.get("metadata") or {}
+    if stage == "accessories":
+        return meta.get("subcategory")
+    if stage == "makeup":
+        return meta.get("makeup_type")
+    return None
+
+
+async def resolve_stage_replay(
+    user_id: str,
+    image_ref: Optional[str],
+    stage: str,
+    replace_all: bool = False,
+    slot_key: Optional[str] = None,
+    slot_value: Optional[str] = None,
+) -> Tuple[Optional[dict], List[dict], bool]:
+    """
+    Replacement-aware source resolution for stage chaining.
+
+    When the user re-applies a slot that already exists in the chain (e.g. new
+    glasses over old glasses), the old result must NOT be composited over.
+    Instead:
+      - the dropped docs (same stage + same slot, or ALL docs of the stage when
+        replace_all=True) are stripped from the chain,
+      - the source becomes the image BEFORE the first dropped doc,
+      - every KEPT doc that was applied after that point is returned as a
+        replay list so the caller can re-apply them on top of the new item.
+
+    Returns (source_doc, replay_docs, dropped_any):
+      source_doc : registry doc whose image the caller should composite onto
+                   (None → caller falls back to legacy resolution)
+      replay_docs: kept stage-result docs (root→tip order) to re-apply after
+                   the new item is composited
+      dropped_any: True when a replacement strip occurred
+    """
+    chain = await get_chain_docs(user_id, image_ref)
+    if not chain:
+        return None, [], False
+
+    def _is_dropped(doc: dict) -> bool:
+        if doc.get("kind") != "stage_result" or doc.get("stage") != stage:
+            return False
+        if replace_all:
+            return True
+        if slot_value is None:
+            return True
+        return _slot_of_doc(stage, doc) == slot_value
+
+    first_drop_idx = next((i for i, d in enumerate(chain) if _is_dropped(d)), None)
+    if first_drop_idx is None:
+        # Nothing to replace — the requested image itself is the correct source
+        return chain[-1], [], False
+
+    source_doc = chain[first_drop_idx - 1] if first_drop_idx > 0 else None
+    if source_doc is None:
+        # The dropped doc starts the chain (no original registered) — treat
+        # the original slot of that doc as the source anyway (should not happen)
+        return None, [], True
+
+    replay_docs = [
+        d for d in chain[first_drop_idx + 1:]
+        if d.get("kind") == "stage_result" and not _is_dropped(d)
+    ]
+    return source_doc, replay_docs, True
+
+
 async def get_session_stages(user_id: str, base_image_id: str) -> dict:
     """
     Latest applied result per styling stage for a styling session rooted at
-    `base_image_id`. Powers the Complete Look screen.
+    `base_image_id`, plus the true CURRENT image of the session (the latest
+    stage result overall — critical when items were re-applied out of order).
+    Powers the Complete Look screen and session restore.
     """
     db = get_database()
     stages: dict = {}
+    current_doc = None
     for stage in STAGE_ORDER:
         doc = await db["images"].find_one(
             {
@@ -254,4 +358,15 @@ async def get_session_stages(user_id: str, base_image_id: str) -> dict:
                 "created_at": doc.get("created_at"),
                 "metadata": doc.get("metadata", {}),
             }
-    return stages
+            if current_doc is None or (doc.get("created_at") or datetime.min.replace(tzinfo=timezone.utc)) > (current_doc.get("created_at") or datetime.min.replace(tzinfo=timezone.utc)):
+                current_doc = doc
+
+    current_image = None
+    if current_doc:
+        current_image = {
+            "image_id": current_doc.get("image_id"),
+            "url": current_doc.get("url"),
+            "stage": current_doc.get("stage"),
+            "created_at": current_doc.get("created_at"),
+        }
+    return {"stages": stages, "current_image": current_image}

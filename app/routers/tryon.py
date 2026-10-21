@@ -39,6 +39,13 @@ from app.services.image_registry import (
     register_stage_result,
     get_chain,
     get_session_stages,
+    resolve_stage_replay,
+    load_image_from_doc,
+)
+from app.services.stage_replay import (
+    ops_from_docs,
+    execute_replay_ops,
+    save_stage_composite,
 )
 from app.database import get_database
 
@@ -85,6 +92,8 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
     """
     Synthesize clothing try-on onto the user's latest styled image.
     Supports garments from both the Digital Wardrobe ('wardrobe') and Catalogue ('catalogue').
+    REPLACEMENT-AWARE: a new outfit REPLACES the previous outfit while
+    re-applying (replaying) all preserved accessory/makeup/hairstyle stages on top.
     """
     user_id = current_user["sub"]
     db = get_database()
@@ -124,6 +133,83 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
     except Exception as exc:
         logger.warning("[Outfit] DB lookup skipped: %s", exc)
 
+    # Replacement-aware source resolution (one outfit at a time)
+    person_img = None
+    replay_docs: list = []
+    dropped = False
+    try:
+        source_doc, replay_docs, dropped = await resolve_stage_replay(
+            user_id, request.person_image_id, stage="outfit", replace_all=True,
+        )
+        if source_doc is not None:
+            person_img, _url = load_image_from_doc(source_doc)
+    except Exception as exc:
+        logger.warning("[Outfit] replay resolution failed: %s", exc)
+
+    if dropped and person_img is not None:
+        # Rebuild: new outfit first, then replay preserved stages on top
+        intermediate = await synthesize_outfit_tryon(
+            person_image_id="replay",
+            garment_id=garment_id,
+            source=request.source,
+            garment_color=garment_color,
+            garment_name=garment_name,
+            garment_image_path=garment_image_path,
+            garment_category=garment_category,
+            explicit_cloth_type=request.cloth_type,
+            user_id=None,
+            person_image_override=person_img,
+            register_result=False,
+        )
+        composite = intermediate.get("composite_image")
+        if composite is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Outfit synthesis failed during rebuild.",
+            )
+        final_img = await execute_replay_ops(composite, ops_from_docs(replay_docs))
+
+        from app.services.stage_replay import save_stage_composite
+        tryon_id = f"tryon-outfit-{uuid.uuid4().hex[:10]}"
+        result_url = save_stage_composite(final_img, tryon_id)
+        now = datetime.now(timezone.utc)
+        result = {
+            "tryon_id": tryon_id,
+            "status": TryOnStatus.completed,
+            "mode": intermediate.get("mode", TryOnMode.prototype),
+            "source": request.source,
+            "parent_image_id": request.person_image_id,
+            "result_image_id": tryon_id,
+            "original_image_url": intermediate.get("original_image_url") or "",
+            "garment_image_url": intermediate.get("garment_image_url"),
+            "result_image_url": result_url,
+            "processing_note": intermediate.get("processing_note"),
+            "created_at": now,
+        }
+        try:
+            await register_stage_result(
+                user_id=user_id,
+                image_id=tryon_id,
+                stage="outfit",
+                parent_image_id=request.person_image_id,
+                tryon_id=tryon_id,
+                url=result_url,
+                metadata={
+                    "garment_id": garment_id,
+                    "garment_name": garment_name,
+                    "source": request.source,
+                    "cloth_type": request.cloth_type,
+                    "mode": str(intermediate.get("mode", "prototype")),
+                    "processing_note": intermediate.get("processing_note"),
+                    "parent_url": intermediate.get("original_image_url") or "",
+                    "replayed": [d.get("image_id") for d in replay_docs],
+                },
+            )
+        except Exception as reg_err:
+            logger.warning("[Outfit] Failed to register replayed result: %s", reg_err)
+        await _save_job({**result, "user_id": user_id, "garment_name": garment_name})
+        return OutfitTryOnResponse(**result)
+
     result = await synthesize_outfit_tryon(
         person_image_id=request.person_image_id,
         garment_id=garment_id,
@@ -155,16 +241,11 @@ from app.services.accessory_service import synthesize_accessory_tryon
 async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = Depends(get_current_user)):
     """
     Anchor accessory to face or body using computer vision landmarks.
-    Operates on the LATEST generated image (previous stage result) when
-    person_image_id refers to a prior try-on result.
+    REPLACEMENT-AWARE: applying an accessory of a subcategory already present
+    in the chain REPLACES it (old one stripped) while all other accessories and
+    earlier styling are preserved via replay.
     """
     user_id = current_user["sub"]
-    person_img, source_url, parent_image_id = await resolve_person_image_for_user(
-        user_id, request.person_image_id
-    )
-    if person_img is None:
-        person_img, source_url = _get_or_create_person_image(request.person_image_id)
-        parent_image_id = request.person_image_id
 
     custom_url = request.custom_image_url
     if not custom_url:
@@ -176,19 +257,63 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
         except Exception as exc:
             logger.warning("[Accessory] DB lookup skipped: %s", exc)
 
-    created_at = datetime.now(timezone.utc)
-    tryon_id = f"tryon-acc-{uuid.uuid4().hex[:10]}"
+    # Replacement-aware source resolution
+    person_img: Optional[object] = None
+    source_url: Optional[str] = None
+    parent_image_id: Optional[str] = None
+    replay_docs: list = []
+    dropped = False
 
     try:
-        composite, landmark, result_url, closeup_result_url, closeup_orig_url = synthesize_accessory_tryon(
-            person_img=person_img,
-            style_item_id=request.style_item_id,
-            subcategory=request.subcategory,
-            custom_image_url=custom_url,
-            override_x=request.position_x,
-            override_y=request.position_y,
-            override_scale=request.scale,
+        source_doc, replay_docs, dropped = await resolve_stage_replay(
+            user_id, request.person_image_id, stage="accessories",
+            replace_all=False, slot_value=request.subcategory,
         )
+        if source_doc is not None:
+            img, url = load_image_from_doc(source_doc)
+            if img is not None:
+                person_img, source_url, parent_image_id = img, url, source_doc["image_id"]
+    except Exception as exc:
+        logger.warning("[Accessory] replay resolution failed: %s", exc)
+
+    if person_img is None:
+        person_img, source_url, parent_image_id = await resolve_person_image_for_user(
+            user_id, request.person_image_id
+        )
+        if person_img is None:
+            person_img, source_url = _get_or_create_person_image(request.person_image_id)
+            parent_image_id = request.person_image_id
+
+    created_at = datetime.now(timezone.utc)
+    tryon_id = f"tryon-acc-{uuid.uuid4().hex[:10]}"
+    closeup_result_url = None
+    closeup_orig_url = None
+
+    try:
+        if dropped:
+            # Rebuild: apply preserved items + the new accessory onto the pre-replacement source
+            ops = ops_from_docs(replay_docs)
+            ops.append({
+                "stage": "accessories",
+                "params": {
+                    "style_item_id": request.style_item_id,
+                    "subcategory": request.subcategory,
+                    "custom_url": custom_url,
+                },
+            })
+            composite = await execute_replay_ops(person_img, ops)
+            landmark = "Replay Rebuild (replacement)"
+            result_url = save_stage_composite(composite, tryon_id)
+        else:
+            composite, landmark, result_url, closeup_result_url, closeup_orig_url = synthesize_accessory_tryon(
+                person_img=person_img,
+                style_item_id=request.style_item_id,
+                subcategory=request.subcategory,
+                custom_image_url=custom_url,
+                override_x=request.position_x,
+                override_y=request.position_y,
+                override_scale=request.scale,
+            )
     except Exception as exc:
         # Honest failure: no fake "completed" result pointing at the original photo
         logger.error("[Accessory] tryon failed: %s", exc)
@@ -229,6 +354,7 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
                 "subcategory": request.subcategory,
                 "style_item_id": request.style_item_id,
                 "landmark_used": landmark,
+                "custom_url": custom_url,
                 "parent_url": source_url,
             },
         )
@@ -283,24 +409,64 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
     """
     Apply virtual makeup using MediaPipe landmark segmentation
     and OpenCV color space alpha blending, on the LATEST generated image.
+    REPLACEMENT-AWARE: re-applying the same makeup type replaces it; a
+    full-transfer look replaces ALL previously applied makeup.
     """
     user_id = current_user["sub"]
-    person_img, source_url, parent_image_id = await resolve_person_image_for_user(
-        user_id, request.person_image_id
-    )
+
+    # Replacement-aware source resolution
+    person_img: Optional[object] = None
+    source_url: Optional[str] = None
+    parent_image_id: Optional[str] = None
+    replay_docs: list = []
+    dropped = False
+
+    m_type = request.makeup_type or "full_transfer"
+    color_hex = request.color_hex or "#BA000D"
+
+    try:
+        source_doc, replay_docs, dropped = await resolve_stage_replay(
+            user_id, request.person_image_id, stage="makeup",
+            replace_all=(m_type == "full_transfer"), slot_value=None if m_type == "full_transfer" else m_type,
+        )
+        if source_doc is not None:
+            img, url = load_image_from_doc(source_doc)
+            if img is not None:
+                person_img, source_url, parent_image_id = img, url, source_doc["image_id"]
+    except Exception as exc:
+        logger.warning("[Makeup] replay resolution failed: %s", exc)
+
     if person_img is None:
-        person_img, source_url = _get_or_create_person_image(request.person_image_id)
-        parent_image_id = request.person_image_id
+        person_img, source_url, parent_image_id = await resolve_person_image_for_user(
+            user_id, request.person_image_id
+        )
+        if person_img is None:
+            person_img, source_url = _get_or_create_person_image(request.person_image_id)
+            parent_image_id = request.person_image_id
 
     created_at = datetime.now(timezone.utc)
-    color_hex = request.color_hex or "#BA000D"
-    m_type = request.makeup_type or "full_transfer"
-
     closeup_result_url = None
     closeup_orig_url = None
 
     try:
-        if m_type == "full_transfer":
+        if dropped:
+            # Rebuild: preserved items + the new makeup look onto the pre-replacement source
+            ops = ops_from_docs(replay_docs)
+            ops.append({
+                "stage": "makeup",
+                "params": {
+                    "makeup_type": m_type,
+                    "color_hex": color_hex,
+                    "intensity": request.intensity,
+                    "finish": request.finish,
+                },
+            })
+            composite = await execute_replay_ops(person_img, ops)
+            landmark_summary = "Replay Rebuild (replacement)"
+            result_url = save_stage_composite(composite, f"tryon-mu-{uuid.uuid4().hex[:10]}")
+            import os as _os
+            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
+        elif m_type == "full_transfer":
             # Complete reference/holistic look transfer: combines lips, eyelids, and cheeks
             res_pil, _, _ = synthesize_makeup_tryon(
                 person_img, "lipstick", color_hex, request.intensity, request.finish
@@ -311,12 +477,14 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
             res_pil, landmark_summary, result_url, closeup_result_url, closeup_orig_url = synthesize_makeup_tryon(
                 res_pil, "blush", "#F48FB1", request.intensity * 0.7, request.finish
             )
+            import os as _os
+            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
         else:
             res_pil, landmark_summary, result_url, closeup_result_url, closeup_orig_url = synthesize_makeup_tryon(
                 person_img, m_type, color_hex, request.intensity, request.finish
             )
-        import os as _os
-        tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
+            import os as _os
+            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
     except Exception as exc:
         # Honest failure
         logger.error("[Makeup] tryon failed: %s", exc)
@@ -400,15 +568,36 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
 async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = Depends(get_current_user)):
     """
     Fit haircut style using head pose estimation (yaw/pitch) and forehead anchor,
-    on the LATEST generated image.
+    on the LATEST generated image. REPLACEMENT-AWARE: a new hairstyle REPLACES
+    any previously applied hairstyle while preserving all other styling.
     """
     user_id = current_user["sub"]
-    person_img, source_url, parent_image_id = await resolve_person_image_for_user(
-        user_id, request.person_image_id
-    )
+
+    # Replacement-aware source resolution (only one hairstyle at a time)
+    person_img: Optional[object] = None
+    source_url: Optional[str] = None
+    parent_image_id: Optional[str] = None
+    replay_docs: list = []
+    dropped = False
+
+    try:
+        source_doc, replay_docs, dropped = await resolve_stage_replay(
+            user_id, request.person_image_id, stage="hairstyle", replace_all=True,
+        )
+        if source_doc is not None:
+            img, url = load_image_from_doc(source_doc)
+            if img is not None:
+                person_img, source_url, parent_image_id = img, url, source_doc["image_id"]
+    except Exception as exc:
+        logger.warning("[Hairstyle] replay resolution failed: %s", exc)
+
     if person_img is None:
-        person_img, source_url = _get_or_create_person_image(request.person_image_id)
-        parent_image_id = request.person_image_id
+        person_img, source_url, parent_image_id = await resolve_person_image_for_user(
+            user_id, request.person_image_id
+        )
+        if person_img is None:
+            person_img, source_url = _get_or_create_person_image(request.person_image_id)
+            parent_image_id = request.person_image_id
 
     created_at = datetime.now(timezone.utc)
 
@@ -427,14 +616,30 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
     closeup_orig_url = None
 
     try:
-        res_pil, landmark_desc, result_url, closeup_result_url, closeup_orig_url = synthesize_hairstyle_tryon(
-            person_img=person_img,
-            style_item_id=request.style_item_id,
-            color_hex=request.color_hex,
-            subcategory=subcategory,
-        )
-        import os as _os
-        tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
+        if dropped:
+            # Rebuild: preserved items + the new hairstyle onto the pre-replacement source
+            ops = ops_from_docs(replay_docs)
+            ops.append({
+                "stage": "hairstyle",
+                "params": {
+                    "style_item_id": request.style_item_id,
+                    "color_hex": request.color_hex,
+                    "style_name": style_name,
+                },
+            })
+            composite = await execute_replay_ops(person_img, ops)
+            result_url = save_stage_composite(composite, f"tryon-hair-{uuid.uuid4().hex[:10]}")
+            import os as _os
+            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
+        else:
+            res_pil, landmark_desc, result_url, closeup_result_url, closeup_orig_url = synthesize_hairstyle_tryon(
+                person_img=person_img,
+                style_item_id=request.style_item_id,
+                color_hex=request.color_hex,
+                subcategory=subcategory,
+            )
+            import os as _os
+            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
     except Exception as exc:
         # Honest failure
         logger.error("[Hairstyle] tryon failed: %s", exc)
@@ -527,8 +732,8 @@ async def get_image_chain(image_id: str, current_user: dict = Depends(get_curren
 async def get_styling_session_stages(base_image_id: str, current_user: dict = Depends(get_current_user)):
     """Powers the Complete Look screen: latest result of each stage rooted at the base portrait."""
     user_id = current_user["sub"]
-    stages = await get_session_stages(user_id, base_image_id)
-    return {"base_image_id": base_image_id, "stages": stages}
+    session_data = await get_session_stages(user_id, base_image_id)
+    return {"base_image_id": base_image_id, **session_data}
 
 
 @router.get(
