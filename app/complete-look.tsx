@@ -13,13 +13,9 @@ import {
   TouchableOpacity,
   Alert,
   Image,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
-import * as Sharing from 'expo-sharing';
 import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
 import { Header } from '@/components/ui/Header';
 import { Card } from '@/components/ui/Card';
@@ -27,6 +23,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { getApiBaseUrl, api } from '@/services/api';
+import { downloadImageToLibrary, shareImage } from '@/services/saveMedia';
 import {
   useStylingSession,
   STAGE_ORDER,
@@ -89,21 +86,12 @@ export default function CompleteLookScreen() {
     if (!finalImageUrl) return;
     setDownloading(true);
     try {
-      if (Platform.OS === 'web') {
-        window.open(finalImageUrl, '_blank');
-        return;
+      const result = await downloadImageToLibrary(finalImageUrl, 'stylevision-complete-look.png');
+      if (result.ok) {
+        Alert.alert('Downloaded! 📥', result.message);
+      } else {
+        Alert.alert('Download Notice', result.message);
       }
-      const perm = await MediaLibrary.requestPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('Permission Needed', 'Please allow photo library access to download your look.');
-        return;
-      }
-      const download = await FileSystem.downloadAsync(
-        finalImageUrl,
-        `${FileSystem.cacheDirectory}stylevision-complete-look.png`
-      );
-      await MediaLibrary.saveToLibraryAsync(download.uri);
-      Alert.alert('Downloaded! 📥', 'Your complete look has been saved to your photo library.');
     } catch (err: any) {
       Alert.alert('Download Failed', err.message || 'Could not download the image right now.');
     } finally {
@@ -114,17 +102,7 @@ export default function CompleteLookScreen() {
   const handleShare = async () => {
     if (!finalImageUrl) return;
     try {
-      if (Platform.OS === 'web') {
-        window.open(finalImageUrl, '_blank');
-        return;
-      }
-      if (await Sharing.isAvailableAsync()) {
-        const download = await FileSystem.downloadAsync(
-          finalImageUrl,
-          `${FileSystem.cacheDirectory}stylevision-complete-look.png`
-        );
-        await Sharing.shareAsync(download.uri, { mimeType: 'image/png' });
-      }
+      await shareImage(finalImageUrl, 'stylevision-complete-look.png');
     } catch (err: any) {
       Alert.alert('Share Failed', err.message || 'Could not share the image right now.');
     }

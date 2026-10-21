@@ -46,6 +46,13 @@
           "cameraPermission": "StyleVision needs access to your camera to take photos for virtual try-on."
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "StyleVision needs access to your photo library to save your complete looks.",
+          "savePhotosPermission": "StyleVision needs permission to save your styled looks to your photo library."
+        }
+      ],
       "expo-sharing"
     ]
   }
