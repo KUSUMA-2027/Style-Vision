@@ -388,6 +388,16 @@ export const api = {
 
     getSessionStages: (baseImageId: string) =>
       request<any>(`/api/v1/tryon/session/${baseImageId}/stages`),
+
+    removeItem: (personImageId: string, stage: string, slotValue?: string) =>
+      request<any>('/api/v1/tryon/remove', {
+        method: 'POST',
+        body: JSON.stringify({
+          person_image_id: personImageId,
+          stage,
+          slot_value: slotValue,
+        }),
+      }),
   },
 
   // --- Saved Looks / History ---

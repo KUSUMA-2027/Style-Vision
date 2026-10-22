@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -30,6 +31,7 @@ import {
   STAGE_LABEL,
   STAGE_ROUTE,
   type Stage,
+  type SessionItem,
 } from '@/services/session';
 
 const STAGE_ICON: Record<Stage, string> = {
@@ -46,6 +48,7 @@ export default function CompleteLookScreen() {
 
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const appliedStages = STAGE_ORDER.filter((s) => session.stages[s]);
   const hasLook = Boolean(session.current && appliedStages.length > 0);
@@ -57,6 +60,31 @@ export default function CompleteLookScreen() {
 
   const resolvedTryonId =
     [...appliedStages].reverse().map((s) => session.stages[s]!.tryonId).find(Boolean) || '';
+
+  const handleRemoveItem = async (item: SessionItem) => {
+    Alert.alert('Remove Item', `Remove "${item.title}" from your look?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          setRemovingId(item.imageId);
+          try {
+            const done = await session.removeItem(item);
+            if (done) {
+              Alert.alert('Removed ✓', `"${item.title}" has been removed from your look.`);
+            } else {
+              Alert.alert('Remove Failed', 'Could not rebuild the look without this item.');
+            }
+          } catch (err: any) {
+            Alert.alert('Remove Failed', err.message || 'Could not remove this item.');
+          } finally {
+            setRemovingId(null);
+          }
+        },
+      },
+    ]);
+  };
 
   const handleSave = async () => {
     if (!resolvedTryonId) return;
@@ -170,7 +198,7 @@ export default function CompleteLookScreen() {
           )}
         </Card>
 
-        {/* Stage checklist — tap any stage to revisit & regenerate */}
+        {/* Stage checklist — free navigation: revisit any stage in ANY order */}
         <Text style={styles.sectionHeading}>Styling Stages</Text>
         <Card style={styles.stagesCard} variant="outlined">
           {STAGE_ORDER.map((stage) => {
@@ -187,7 +215,7 @@ export default function CompleteLookScreen() {
                 <View style={styles.stageInfo}>
                   <Text style={styles.stageName}>{STAGE_LABEL[stage]}</Text>
                   <Text style={styles.stageDetail} numberOfLines={1}>
-                    {done ? result!.title : 'Not applied yet — tap to style'}
+                    {done ? result!.title : 'Tap to style — any order you like'}
                   </Text>
                 </View>
                 <Badge
@@ -199,9 +227,43 @@ export default function CompleteLookScreen() {
           })}
         </Card>
         <Text style={styles.revisitNote}>
-          Revisit any stage to regenerate it — the result will be rebuilt on top of your latest
-          combined look.
+          Style in any order — jump straight to jewelry, hair, or makeup. Tap an applied stage to
+          change it.
         </Text>
+
+        {/* Applied items — individual remove */}
+        {session.items.length > 0 && (
+          <>
+            <Text style={styles.sectionHeading}>Applied Items ({session.items.length})</Text>
+            <Card style={styles.stagesCard} variant="outlined">
+              {session.items.map((item) => (
+                <View key={item.imageId} style={styles.stageRow}>
+                  <Text style={styles.stageIcon}>{STAGE_ICON[item.stage as Stage] ?? '✨'}</Text>
+                  <View style={styles.stageInfo}>
+                    <Text style={styles.stageName} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.stageDetail}>
+                      {STAGE_LABEL[item.stage as Stage] ?? item.stage}
+                      {item.slot ? ` • ${item.slot}` : ''}
+                    </Text>
+                  </View>
+                  {removingId === item.imageId ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => handleRemoveItem(item)}
+                      style={styles.removeItemBtn}
+                      accessibilityLabel={`Remove ${item.title}`}
+                    >
+                      <Text style={styles.removeItemText}>🗑 Remove</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </Card>
+          </>
+        )}
 
         {/* Actions */}
         <View style={styles.actions}>
@@ -348,6 +410,19 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginBottom: Spacing.xl,
     lineHeight: 16,
+  },
+  removeItemBtn: {
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  removeItemText: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    fontWeight: Typography.weights.bold,
   },
   actions: {
     gap: Spacing.md,

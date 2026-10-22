@@ -61,17 +61,29 @@ export interface StageResult {
   appliedAt: number;
 }
 
+export interface SessionItem {
+  imageId: string;
+  tryonId: string;
+  stage: Stage;
+  slot: string | null;
+  title: string;
+  url: string;
+}
+
 interface StylingSessionValue {
   ready: boolean;
   base: PortraitRef | null;
   current: PortraitRef | null;
   stages: Partial<Record<Stage, StageResult>>;
+  items: SessionItem[];
   selections: Partial<Record<Stage, any>>;
   nextStage: Stage | null;
   ensureSession: (portrait: PortraitRef) => void;
   startSession: (base: PortraitRef) => void;
   setSelection: (stage: Stage, selection: any) => void;
   applyStageResult: (result: StageResult) => void;
+  syncSession: () => Promise<void>;
+  removeItem: (item: SessionItem) => Promise<boolean>;
   resetSession: () => void;
   restoreFromServer: () => Promise<void>;
 }
@@ -83,11 +95,60 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
   const [base, setBase] = useState<PortraitRef | null>(null);
   const [current, setCurrent] = useState<PortraitRef | null>(null);
   const [stages, setStages] = useState<Partial<Record<Stage, StageResult>>>({});
+  const [items, setItems] = useState<SessionItem[]>([]);
   const [selections, setSelections] = useState<Partial<Record<Stage, any>>>({});
+
+  const mapServerItem = (it: any): SessionItem | null => {
+    if (!it?.image_id || !it?.stage) return null;
+    return {
+      imageId: it.image_id,
+      tryonId: it.tryon_id ?? '',
+      stage: it.stage,
+      slot: it.slot ?? null,
+      title: it.title ?? it.stage,
+      url: it.url ?? '',
+    };
+  };
+
+  /** Rebuild local session state (current image + items + stages) from the server. */
+  const applyServerSession = useCallback((data: any) => {
+    if (data?.current_image?.url && data?.current_image?.image_id) {
+      setCurrent({ image_id: data.current_image.image_id, url: data.current_image.url });
+    }
+    const serverItems: SessionItem[] = (data?.items ?? [])
+      .map(mapServerItem)
+      .filter(Boolean) as SessionItem[];
+    setItems(serverItems);
+
+    const builtStages: Partial<Record<Stage, StageResult>> = {};
+    for (const it of serverItems) {
+      builtStages[it.stage] = {
+        stage: it.stage,
+        tryonId: it.tryonId,
+        resultImageId: it.imageId,
+        resultUrl: it.url,
+        sourceUrl: '',
+        title: it.title,
+        appliedAt: Date.now(),
+      };
+    }
+    setStages(builtStages);
+  }, []);
+
+  /** Fetch the authoritative session state from the backend. */
+  const syncSession = useCallback(async () => {
+    if (!base?.image_id) return;
+    try {
+      const res = await api.tryon.getSessionStages(base.image_id);
+      applyServerSession(res);
+    } catch {
+      // Offline or expired token — keep local state
+    }
+  }, [base, applyServerSession]);
 
   /**
    * Restore an in-progress styling session from the server:
-   * latest portrait → per-stage results rooted at that portrait.
+   * latest portrait → current image + live items rooted at that portrait.
    */
   const restoreFromServer = useCallback(async () => {
     try {
@@ -98,48 +159,20 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       }
       const restoredBase: PortraitRef = { image_id: latest.image_id, url: latest.url };
       setBase(restoredBase);
-
-      let restoredCurrent: PortraitRef = restoredBase;
-      const restoredStages: Partial<Record<Stage, StageResult>> = {};
       try {
         const res = await api.tryon.getSessionStages(latest.image_id);
-        for (const stage of STAGE_ORDER) {
-          const s = res?.stages?.[stage];
-          if (s?.url && s?.image_id) {
-            restoredStages[stage] = {
-              stage,
-              tryonId: s.tryon_id ?? '',
-              resultImageId: s.image_id,
-              resultUrl: s.url,
-              sourceUrl: s.metadata?.parent_url ?? restoredBase.url,
-              title: s.metadata?.style_name ?? s.metadata?.garment_name ?? STAGE_LABEL[stage],
-              mode: s.metadata?.mode,
-              appliedAt: s.created_at ? new Date(s.created_at).getTime() : Date.now(),
-            };
-          }
-        }
-        // The true current image is the server's latest stage result overall
-        // (critical when items were re-applied / replaced out of order)
-        if (res?.current_image?.url && res?.current_image?.image_id) {
-          restoredCurrent = { image_id: res.current_image.image_id, url: res.current_image.url };
-        } else {
-          // Fallback: deepest applied stage in pipeline order
-          for (const stage of STAGE_ORDER) {
-            const s = restoredStages[stage];
-            if (s) restoredCurrent = { image_id: s.resultImageId || s.tryonId, url: s.resultUrl };
-          }
-        }
+        applyServerSession(res);
+        // No applied items yet → current stays at the base portrait
+        if (!res?.current_image) setCurrent(restoredBase);
       } catch {
-        // Session stages endpoint unavailable — base portrait still restored
+        setCurrent(restoredBase);
       }
-      setStages(restoredStages);
-      setCurrent(restoredCurrent);
     } catch {
       // Not authenticated yet or offline — start with an empty session
     } finally {
       setReady(true);
     }
-  }, []);
+  }, [applyServerSession]);
 
   useEffect(() => {
     restoreFromServer();
@@ -150,6 +183,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
     setBase(portrait);
     setCurrent(portrait);
     setStages({});
+    setItems([]);
     setSelections({});
   }, []);
 
@@ -169,31 +203,58 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
   }, []);
 
   /**
-   * Record a completed stage result. The result becomes the new "current"
-   * image that subsequent stages chain from. Re-running an earlier stage
-   * invalidates later results (they were generated from the previous chain)
-   * while retaining the user's selections for one-tap re-apply.
+   * Record a completed stage result. Optimistically set the result as the
+   * new "current" image, then reconcile with the authoritative server state
+   * (the backend already handles replacement + replay of preserved items).
+   * No forced stage clearing — the user may style stages in ANY order.
    */
   const applyStageResult = useCallback((result: StageResult) => {
-    setStages((prev) => {
-      const idx = STAGE_ORDER.indexOf(result.stage);
-      const next: Partial<Record<Stage, StageResult>> = { ...prev };
-      for (const later of STAGE_ORDER.slice(idx + 1)) {
-        delete next[later];
-      }
-      next[result.stage] = result;
-      return next;
-    });
+    setStages((prev) => ({ ...prev, [result.stage]: result }));
     const resultImageId = result.resultImageId || result.tryonId;
     if (resultImageId) {
       setCurrent({ image_id: resultImageId, url: result.resultUrl });
     }
-  }, []);
+    setItems((prev) => [
+      ...prev.filter((it) => !(it.stage === result.stage && it.slot && it.slot === undefined)),
+      {
+        imageId: resultImageId,
+        tryonId: result.tryonId,
+        stage: result.stage,
+        slot: null,
+        title: result.title,
+        url: result.resultUrl,
+      },
+    ]);
+    void syncSession();
+  }, [syncSession]);
+
+  /**
+   * Remove an applied item from the look. The backend strips it from the
+   * chain, rebuilds the image, and replays the preserved items; the session
+   * then syncs to the rebuilt state.
+   */
+  const removeItem = useCallback(
+    async (item: SessionItem): Promise<boolean> => {
+      if (!current?.image_id) return false;
+      try {
+        const res = await api.tryon.removeItem(current.image_id, item.stage, item.slot ?? undefined);
+        if (res?.status === 'failed') {
+          return false;
+        }
+        await syncSession();
+        return true;
+      } catch (err: any) {
+        throw new Error(err?.message || 'Could not remove this item.');
+      }
+    },
+    [current, syncSession]
+  );
 
   const resetSession = useCallback(() => {
     setBase(null);
     setCurrent(null);
     setStages({});
+    setItems([]);
     setSelections({});
   }, []);
 
@@ -210,12 +271,15 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       base,
       current,
       stages,
+      items,
       selections,
       nextStage,
       ensureSession,
       startSession,
       setSelection,
       applyStageResult,
+      syncSession,
+      removeItem,
       resetSession,
       restoreFromServer,
     }),
@@ -224,12 +288,15 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       base,
       current,
       stages,
+      items,
       selections,
       nextStage,
       ensureSession,
       startSession,
       setSelection,
       applyStageResult,
+      syncSession,
+      removeItem,
       resetSession,
       restoreFromServer,
     ]

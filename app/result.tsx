@@ -45,6 +45,7 @@ export default function ResultScreen() {
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [downloading, setDownloading] = useState<boolean>(false);
+  const [removing, setRemoving] = useState<boolean>(false);
 
   const hasCloseup = Boolean(params.closeupResultUrl);
   const [focusMode, setFocusMode] = useState<'closeup' | 'full'>(
@@ -156,6 +157,29 @@ export default function ResultScreen() {
       await shareImage(fullResultUrl, `${params.tryonId || 'stylevision-look'}.png`);
     } catch (err: any) {
       Alert.alert('Share Failed', err.message || 'Could not share the image right now.');
+    }
+  };
+
+  // The just-applied item (if it's part of the current look) can be removed directly
+  const appliedItem = session.items.find(
+    (it) => (it.tryonId && it.tryonId === params.tryonId) || it.imageId === params.tryonId
+  );
+
+  const handleRemoveThis = async () => {
+    if (!appliedItem) return;
+    setRemoving(true);
+    try {
+      const done = await session.removeItem(appliedItem);
+      if (done) {
+        Alert.alert('Removed ✓', `"${appliedItem.title}" was removed from your look.`);
+        router.back();
+      } else {
+        Alert.alert('Remove Failed', 'Could not rebuild the look without this item.');
+      }
+    } catch (err: any) {
+      Alert.alert('Remove Failed', err.message || 'Could not remove this item.');
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -411,6 +435,17 @@ export default function ResultScreen() {
               style={styles.downloadBtn}
             />
           </View>
+          {appliedItem && (
+            <Button
+              title={removing ? 'Removing...' : 'Remove this item 🗑'}
+              variant="ghost"
+              size="md"
+              onPress={handleRemoveThis}
+              disabled={removing}
+              loading={removing}
+              style={styles.actionBtn}
+            />
+          )}
         </View>
       </ScrollView>
 

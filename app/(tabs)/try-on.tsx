@@ -95,6 +95,26 @@ export default function TryOnHubScreen() {
           </View>
         </Card>
 
+        {/* Complete Look Card */}
+        <Card
+          style={styles.uploadCard}
+          variant="elevated"
+          onPress={() => router.push('/complete-look')}
+        >
+          <View style={styles.uploadContent}>
+            <View style={styles.uploadIconWrap}>
+              <Text style={styles.uploadIcon}>🪞</Text>
+            </View>
+            <View style={styles.uploadTextWrap}>
+              <Text style={styles.uploadTitle}>The Complete Look</Text>
+              <Text style={styles.uploadDesc}>
+                View your combined styled look — remove items, save, download, or share.
+              </Text>
+            </View>
+            <Text style={styles.uploadActionText}>Open ➔</Text>
+          </View>
+        </Card>
+
         {/* Filter Pills */}
         <ScrollView
           horizontal
