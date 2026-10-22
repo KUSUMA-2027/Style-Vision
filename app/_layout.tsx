@@ -18,7 +18,7 @@ import { getAuthToken } from '@/services/api';
 // Keep the splash screen visible while fonts or assets are loading
 SplashScreen.preventAutoHideAsync();
 
-const PUBLIC_ROUTES = ['/onboarding', '/(auth)/login', '/(auth)/register'];
+const PUBLIC_ROUTES = ['/onboarding', '/login', '/register', '/(auth)/login', '/(auth)/register'];
 
 export default function RootLayout() {
   const router = useRouter();

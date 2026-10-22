@@ -101,6 +101,7 @@ export default function CompleteLookScreen() {
         base_image_id: session.base?.image_id,
         final_image_id: session.current?.image_id,
         stages: stageMeta,
+        category: 'complete',
       });
       Alert.alert('Look Saved! 💎', 'Your complete look is now in your Atelier Lookbook.');
     } catch (err: any) {

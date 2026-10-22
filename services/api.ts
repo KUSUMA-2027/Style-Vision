@@ -11,7 +11,13 @@ import { TryOnCategory } from '@/types';
 
 // Dynamic API URL resolver matching dev environment
 export function getApiBaseUrl(): string {
-  // 1. Auto-detect host IP from Expo bundler (dynamically matches current Wi-Fi)
+  // 1. Browser check for web testing
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location) {
+    const hostname = window.location.hostname || 'localhost';
+    return `http://${hostname}:8000`;
+  }
+
+  // 2. Auto-detect host IP from Expo bundler (dynamically matches current Wi-Fi)
   const hostUri = Constants.expoConfig?.hostUri;
   if (hostUri) {
     const hostIp = hostUri.split(':')[0];
@@ -20,13 +26,13 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  // 2. Fall back to environment variable
+  // 3. Fall back to environment variable
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
     return envUrl;
   }
 
-  // 3. Current active Wi-Fi IP
+  // 4. Default Wi-Fi IP / local fallback
   return 'http://192.168.29.173:8000';
 }
 
@@ -94,7 +100,15 @@ async function request<T>(
     let errorDetail = `HTTP ${response.status}`;
     try {
       const errorJson = await response.json();
-      errorDetail = errorJson.detail || errorJson.error || errorDetail;
+      if (typeof errorJson.detail === 'string') {
+        errorDetail = errorJson.detail;
+      } else if (Array.isArray(errorJson.detail)) {
+        errorDetail = errorJson.detail
+          .map((d: any) => (d.msg ? `${d.loc ? d.loc.join('.') + ': ' : ''}${d.msg}` : JSON.stringify(d)))
+          .join(', ');
+      } else if (errorJson.error) {
+        errorDetail = errorJson.error;
+      }
     } catch {
       // Body was not json
     }
@@ -257,6 +271,8 @@ export const api = {
   wardrobe: {
     list: () => request<any>('/api/v1/wardrobe'),
 
+    get: (outfitId: string) => request<any>(`/api/v1/wardrobe/${outfitId}`),
+
     upload: async (uri: string, name: string, category: string = 'top', mimeType: string = 'image/jpeg') => {
       const baseUrl = getApiBaseUrl();
       const token = await getAuthToken();
@@ -316,6 +332,15 @@ export const api = {
 
       return JSON.parse(uploadResult.body);
     },
+
+    update: (
+      outfitId: string,
+      updates: { name?: string; category?: string; color?: string; notes?: string }
+    ) =>
+      request<any>(`/api/v1/wardrobe/${outfitId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+      }),
 
     delete: (outfitId: string) =>
       request<any>(`/api/v1/wardrobe/${outfitId}`, {
@@ -405,10 +430,12 @@ export const api = {
     list: (category?: TryOnCategory) =>
       request<any>(category ? `/api/v1/history?category=${category}` : '/api/v1/history'),
 
+    get: (lookId: string) => request<any>(`/api/v1/history/${lookId}`),
+
     save: (
       tryonId: string,
       title?: string,
-      sessionMeta?: { base_image_id?: string; final_image_id?: string; stages?: any[] }
+      sessionMeta?: { base_image_id?: string; final_image_id?: string; stages?: any[]; category?: string }
     ) =>
       request<any>('/api/v1/history/save', {
         method: 'POST',
@@ -417,6 +444,12 @@ export const api = {
           title,
           ...(sessionMeta || {}),
         }),
+      }),
+
+    update: (lookId: string, updates: { title?: string }) =>
+      request<any>(`/api/v1/history/${lookId}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
       }),
 
     delete: (lookId: string) =>
@@ -429,10 +462,10 @@ export const api = {
   profile: {
     get: () => request<any>('/api/v1/profile'),
 
-    update: (name?: string) =>
+    update: (updates: { name?: string; profile_photo?: string }) =>
       request<any>('/api/v1/profile', {
         method: 'PUT',
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(updates),
       }),
   },
 

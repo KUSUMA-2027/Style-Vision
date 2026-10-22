@@ -172,6 +172,7 @@ export default function AccessoriesScreen() {
         sourceUrl: res.original_image_url ?? sourceImage.url,
         title: chosen?.name ?? 'Accessory Try-On',
         style: chosen?.subcategory,
+        slot: chosen?.subcategory ?? 'glasses',
         closeupResultUrl: res.closeup_result_image_url ?? null,
         closeupOriginalUrl: res.closeup_original_image_url ?? null,
         appliedAt: Date.now(),

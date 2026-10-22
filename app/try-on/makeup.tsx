@@ -112,6 +112,7 @@ export default function MakeupStudioScreen() {
         sourceUrl: res.original_image_url ?? sourceImage.url,
         title: chosen?.name ?? 'Virtual Makeup Look',
         style: `${activeTab} • ${finish}`,
+        slot: activeTab,
         closeupResultUrl: res.closeup_result_image_url ?? null,
         closeupOriginalUrl: res.closeup_original_image_url ?? null,
         appliedAt: Date.now(),

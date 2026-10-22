@@ -13,45 +13,38 @@ import { Colors, Spacing, BorderRadius, Typography, Shadows } from '@/constants/
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { api, getAuthToken, getApiBaseUrl } from '@/services/api';
 
-function resolveApiUrl(): string {
-  const envUrl = process.env.EXPO_PUBLIC_API_URL;
-  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
-    return envUrl;
-  }
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    const hostIp = hostUri.split(':')[0];
-    if (hostIp) {
-      return `http://${hostIp}:8000`;
-    }
-  }
-  return envUrl || 'http://10.92.114.240:8000';
-}
 
-const API_URL = resolveApiUrl();
 
 export default function HomeDashboard() {
   const router = useRouter();
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [backendDetails, setBackendDetails] = useState<string>('');
+  const [isAdmin, setIsAdmin] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const checkHealth = async () => {
     try {
       setBackendStatus('checking');
-      const res = await fetch(`${API_URL}/health`, { method: 'GET' });
-      if (res.ok) {
-        const data = await res.json();
-        setBackendStatus('connected');
-        setBackendDetails(`${data.app} v${data.version} (${data.tryon_mode} mode)`);
+      const data = await api.health();
+      setBackendStatus('connected');
+      setBackendDetails(`${data.app} v${data.version} (${data.tryon_mode} mode)`);
+    } catch (err: any) {
+      setBackendStatus('disconnected');
+      setBackendDetails(err.message || 'Unreachable');
+    }
+
+    try {
+      const token = await getAuthToken();
+      if (token) {
+        const me = await api.auth.getMe();
+        setIsAdmin(Boolean(me?.is_admin));
       } else {
-        setBackendStatus('disconnected');
-        setBackendDetails(`HTTP ${res.status}`);
+        setIsAdmin(false);
       }
     } catch {
-      setBackendStatus('disconnected');
-      setBackendDetails('Unreachable');
+      setIsAdmin(false);
     }
   };
 
@@ -111,7 +104,7 @@ export default function HomeDashboard() {
                   ? `Atelier Engine Active: ${backendDetails}`
                   : backendStatus === 'checking'
                   ? 'Connecting to atelier engine...'
-                  : `Engine offline (${API_URL})`}
+                  : `Engine offline (${getApiBaseUrl()})`}
               </Text>
             </View>
             <TouchableOpacity onPress={checkHealth}>
@@ -221,20 +214,22 @@ export default function HomeDashboard() {
           </View>
         </Card>
 
-        {/* Admin Portal Shortcut */}
-        <Card
-          style={styles.adminCard}
-          variant="flat"
-          onPress={() => router.push('/admin/catalogue')}
-        >
-          <View style={styles.adminRow}>
-            <View>
-              <Text style={styles.adminTitle}>Atelier Catalogue Management</Text>
-              <Text style={styles.adminSubtitle}>Curate wardrobe archives & designer items</Text>
+        {/* Admin Portal Shortcut (Admins Only) */}
+        {isAdmin && (
+          <Card
+            style={styles.adminCard}
+            variant="flat"
+            onPress={() => router.push('/admin/catalogue')}
+          >
+            <View style={styles.adminRow}>
+              <View>
+                <Text style={styles.adminTitle}>Atelier Catalogue Management</Text>
+                <Text style={styles.adminSubtitle}>Curate wardrobe archives & designer items</Text>
+              </View>
+              <Text style={styles.adminArrow}>➔</Text>
             </View>
-            <Text style={styles.adminArrow}>➔</Text>
-          </View>
-        </Card>
+          </Card>
+        )}
 
         {/* Footer */}
         <Text style={styles.footerText}>

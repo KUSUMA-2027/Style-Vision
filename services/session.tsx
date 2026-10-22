@@ -56,6 +56,7 @@ export interface StageResult {
   title: string;
   style?: string;
   mode?: string;
+  slot?: string | null;
   closeupResultUrl?: string | null;
   closeupOriginalUrl?: string | null;
   appliedAt: number;
@@ -129,6 +130,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
         resultUrl: it.url,
         sourceUrl: '',
         title: it.title,
+        slot: it.slot,
         appliedAt: Date.now(),
       };
     }
@@ -215,12 +217,22 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       setCurrent({ image_id: resultImageId, url: result.resultUrl });
     }
     setItems((prev) => [
-      ...prev.filter((it) => !(it.stage === result.stage && it.slot && it.slot === undefined)),
+      ...prev.filter((it) => {
+        // Single-item stages: outfit and hairstyle are singular
+        if (result.stage === 'outfit' || result.stage === 'hairstyle') {
+          return it.stage !== result.stage;
+        }
+        // Slotted stages: replace only if the slot matches
+        if (it.stage === result.stage && result.slot && it.slot === result.slot) {
+          return false;
+        }
+        return true;
+      }),
       {
         imageId: resultImageId,
         tryonId: result.tryonId,
         stage: result.stage,
-        slot: null,
+        slot: result.slot ?? null,
         title: result.title,
         url: result.resultUrl,
       },

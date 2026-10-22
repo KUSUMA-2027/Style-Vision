@@ -2,7 +2,7 @@
  * StyleVision — Shared Type Definitions
  */
 
-export type TryOnCategory = 'outfit' | 'accessories' | 'makeup' | 'hairstyle';
+export type TryOnCategory = 'outfit' | 'accessories' | 'makeup' | 'hairstyle' | 'complete';
 
 export interface StyleItem {
   id: string;
@@ -21,6 +21,8 @@ export interface UserProfile {
   email: string;
   avatarUrl?: string;
   savedLooksCount: number;
+  wardrobeCount?: number;
+  is_admin?: boolean;
   createdAt: string;
 }
 
@@ -32,4 +34,15 @@ export interface SavedLook {
   resultImage: string;
   createdAt: string;
   styleItemName: string;
+}
+
+export interface WardrobeItem {
+  outfit_id: string;
+  user_id: string;
+  name: string;
+  category: string;
+  outfit_image: string;
+  color?: string;
+  notes?: string;
+  uploaded_at: string;
 }

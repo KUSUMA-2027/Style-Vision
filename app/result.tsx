@@ -121,6 +121,7 @@ export default function ResultScreen() {
         base_image_id: session.base?.image_id,
         final_image_id: session.current?.image_id,
         stages: stageMeta,
+        category: lookCategory,
       });
       setIsSaved(true);
       Alert.alert('Saved to Lookbook! 💎', 'This couture styling result has been saved to your Atelier Lookbook.');

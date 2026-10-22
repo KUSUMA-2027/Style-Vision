@@ -21,7 +21,7 @@ import { getApiBaseUrl, api } from '@/services/api';
 interface HistoryItem {
   look_id: string;
   title: string;
-  category: 'outfit' | 'accessories' | 'makeup' | 'hairstyle';
+  category: 'outfit' | 'accessories' | 'makeup' | 'hairstyle' | 'complete';
   categoryLabel: string;
   createdAt: string;
   styleName: string;
@@ -34,6 +34,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   accessories: 'Accessories',
   makeup: 'Makeup',
   hairstyle: 'Hairstyle',
+  complete: 'Complete Look',
 };
 
 function formatTime(iso: string | Date): string {
@@ -47,7 +48,7 @@ function formatTime(iso: string | Date): string {
 export default function HistoryScreen() {
   const router = useRouter();
   const baseUrl = getApiBaseUrl();
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'outfit' | 'accessories' | 'makeup' | 'hairstyle'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'outfit' | 'accessories' | 'makeup' | 'hairstyle' | 'complete'>('all');
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -135,6 +136,7 @@ export default function HistoryScreen() {
                 { key: 'accessories', label: 'Accessories' },
                 { key: 'makeup', label: 'Makeup' },
                 { key: 'hairstyle', label: 'Hairstyles' },
+                { key: 'complete', label: 'Complete Looks' },
               ] as const
             ).map((f) => {
               const active = selectedFilter === f.key;

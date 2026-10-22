@@ -17,7 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { api } from '@/services/api';
+import { api, getApiBaseUrl } from '@/services/api';
 
 export interface UploadedPhotoData {
   image_id: string;
@@ -140,7 +140,22 @@ export const PhotoPicker: React.FC<PhotoPickerProps> = ({
     setUploadedData(null);
   };
 
-  const currentDisplayUri = localUri || uploadedData?.url;
+  const resolveDisplayUri = (url?: string | null) => {
+    if (!url) return null;
+    if (
+      url.startsWith('file://') ||
+      url.startsWith('content://') ||
+      url.startsWith('http://') ||
+      url.startsWith('https://') ||
+      url.startsWith('data:')
+    ) {
+      return url;
+    }
+    const base = getApiBaseUrl();
+    return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
+  const currentDisplayUri = localUri || resolveDisplayUri(uploadedData?.url);
 
   return (
     <View style={styles.container}>

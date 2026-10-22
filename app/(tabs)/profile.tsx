@@ -15,9 +15,11 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { api, getAuthToken, removeAuthToken } from '@/services/api';
+import { useStylingSession } from '@/services/session';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const session = useStylingSession();
   const [highQuality, setHighQuality] = useState(true);
   const [cloudGpuMode, setCloudGpuMode] = useState(false);
   const [profile, setProfile] = useState<{
@@ -25,6 +27,8 @@ export default function ProfileScreen() {
     email: string;
     saved_looks_count: number;
     tryons_count: number;
+    wardrobe_count: number;
+    is_admin: boolean;
   } | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
@@ -42,6 +46,8 @@ export default function ProfileScreen() {
         email: p.email,
         saved_looks_count: p.saved_looks_count ?? 0,
         tryons_count: p.tryons_count ?? 0,
+        wardrobe_count: p.wardrobe_count ?? 0,
+        is_admin: Boolean(p.is_admin),
       });
     } catch {
       setProfile(null);
@@ -61,6 +67,7 @@ export default function ProfileScreen() {
         text: 'Sign Out',
         style: 'destructive',
         onPress: async () => {
+          session.resetSession();
           await removeAuthToken();
           setIsAuthenticated(false);
           setProfile(null);
@@ -134,8 +141,8 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>Lookbook</Text>
           </Card>
           <Card style={styles.statCard} variant="flat">
-            <Text style={styles.statNumber}>{profile ? 4 : '—'}</Text>
-            <Text style={styles.statLabel}>Salons</Text>
+            <Text style={styles.statNumber}>{profile?.wardrobe_count ?? '—'}</Text>
+            <Text style={styles.statLabel}>Wardrobe</Text>
           </Card>
         </View>
 
@@ -186,13 +193,18 @@ export default function ProfileScreen() {
 
           <View style={styles.divider} />
 
-          <TouchableOpacity
-            style={styles.actionRow}
-            onPress={() => router.push('/admin/catalogue')}
-          >
-            <Text style={styles.actionTitle}>Admin Catalogue Management</Text>
-            <Text style={styles.actionChevron}>⚙️</Text>
-          </TouchableOpacity>
+          {profile?.is_admin && (
+            <>
+              <View style={styles.divider} />
+              <TouchableOpacity
+                style={styles.actionRow}
+                onPress={() => router.push('/admin/catalogue')}
+              >
+                <Text style={styles.actionTitle}>Admin Catalogue Management</Text>
+                <Text style={styles.actionChevron}>⚙️</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </Card>
 
         {/* App Info Card */}
