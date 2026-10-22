@@ -171,6 +171,43 @@ def _apply_hair_color(hair_rgba: Image.Image, color_hex: Optional[str]) -> Image
     return Image.fromarray(np_rgba, mode="RGBA")
 
 
+
+def _call_cloud_hairstyle_sync(
+    endpoint: str,
+    person_img: Image.Image,
+    hair_img: Image.Image,
+    hairstyle_name: str,
+    color_hex: Optional[str] = None,
+    timeout_secs: float = 35.0,
+) -> Optional[Image.Image]:
+    import httpx, io
+    clean_endpoint = endpoint.strip().rstrip("/")
+    url = f"{clean_endpoint}/tryon-hair"
+
+    p_buf = io.BytesIO()
+    person_img.convert("RGB").save(p_buf, format="JPEG", quality=95)
+    h_buf = io.BytesIO()
+    hair_img.convert("RGB").save(h_buf, format="JPEG", quality=95)
+
+    files = {
+        "person_image": ("person.jpg", p_buf.getvalue(), "image/jpeg"),
+        "hair_image": ("hair.jpg", h_buf.getvalue(), "image/jpeg"),
+    }
+    data = {
+        "hairstyle_name": hairstyle_name,
+        "color_hex": color_hex or ""
+    }
+    try:
+        with httpx.Client(timeout=timeout_secs) as client:
+            resp = client.post(url, files=files, data=data)
+            if resp.status_code == 200:
+                logger.info("Cloud neural hairstyle tryon successful via %s", url)
+                return Image.open(io.BytesIO(resp.content)).convert("RGB")
+    except Exception as exc:
+        logger.warning("Cloud hairstyle endpoint %s unreachable or skipped (%s)", url, exc)
+    return None
+
+
 def synthesize_hairstyle_tryon(
     person_img: Image.Image,
     style_item_id: str,
@@ -220,74 +257,92 @@ def synthesize_hairstyle_tryon(
     hair_asset_pil = _apply_hair_color(hair_asset_pil, color_hex)
     hair_rgba = np.array(hair_asset_pil)
 
-    # 3. Determine style-specific geometry profile
-    filename = (
-        HAIRSTYLE_ASSET_MAP.get(style_item_id)
-        or (HAIRSTYLE_ASSET_MAP.get(subcategory.lower()) if subcategory else None)
-        or "beach_waves.png"
-    )
-    prof = HAIRSTYLE_PROFILES.get(filename, {"top_y": 141, "cx": 389.0, "cw": 464.0, "margin": 1.15, "y_adj": 10})
+    cloud_neural_used = False
+    if settings.catvton_endpoint:
+        try:
+            cloud_res = _call_cloud_hairstyle_sync(
+                endpoint=settings.catvton_endpoint,
+                person_img=person_img,
+                hair_img=hair_asset_pil,
+                hairstyle_name=style_item_id or (subcategory or "hairstyle"),
+                color_hex=color_hex
+            )
+            if cloud_res:
+                final_pil = cloud_res.resize((w, h), Image.Resampling.LANCZOS)
+                landmark_summary = "Neural Diffusion (IP-Adapter on GPU)"
+                cloud_neural_used = True
+        except Exception as exc:
+            logger.warning("[Hairstyle] Cloud neural try-on failed (%s), using landmark overlay", exc)
 
-    # 4. Scale hairstyle to head dimensions
-    ah, aw = hair_rgba.shape[:2]
-    base_scale = (face_w * prof["margin"]) / prof["cw"]
-    # Constrain by face height so hair covers head properly
-    h_scale = (face_h * 1.15) / ah
-    final_scale = min(base_scale, h_scale)
-    # Ensure minimum visible size relative to image width
-    min_scale = (w * 0.25) / aw
-    final_scale = max(final_scale, min_scale)
-    if scale_override is not None:
-        final_scale = final_scale * scale_override
-    target_w = max(60, int(aw * final_scale))
-    target_h = max(60, int(ah * final_scale))
-    hair_resized = cv2.resize(hair_rgba, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
-
-    # 5. Rotate by head roll angle
-    if abs(angle_deg) > 0.5:
-        M_rot = cv2.getRotationMatrix2D((target_w / 2, target_h / 2), angle_deg, 1.0)
-        cos = np.abs(M_rot[0, 0])
-        sin = np.abs(M_rot[0, 1])
-        nW = int((target_h * sin) + (target_w * cos))
-        nH = int((target_h * cos) + (target_w * sin))
-        M_rot[0, 2] += (nW / 2) - target_w / 2
-        M_rot[1, 2] += (nH / 2) - target_h / 2
-        hair_transformed = cv2.warpAffine(
-            hair_resized, M_rot, (nW, nH), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0)
+    if not cloud_neural_used:
+        # 3. Determine style-specific geometry profile
+        filename = (
+            HAIRSTYLE_ASSET_MAP.get(style_item_id)
+            or (HAIRSTYLE_ASSET_MAP.get(subcategory.lower()) if subcategory else None)
+            or "beach_waves.png"
         )
-    else:
-        hair_transformed = hair_resized
+        prof = HAIRSTYLE_PROFILES.get(filename, {"top_y": 141, "cx": 389.0, "cw": 464.0, "margin": 1.15, "y_adj": 10})
 
-    tw, th = hair_transformed.shape[1], hair_transformed.shape[0]
+        # 4. Scale hairstyle to head dimensions
+        ah, aw = hair_rgba.shape[:2]
+        base_scale = (face_w * prof["margin"]) / prof["cw"]
+        # Constrain by face height so hair covers head properly
+        h_scale = (face_h * 1.15) / ah
+        final_scale = min(base_scale, h_scale)
+        # Ensure minimum visible size relative to image width
+        min_scale = (w * 0.25) / aw
+        final_scale = max(final_scale, min_scale)
+        if scale_override is not None:
+            final_scale = final_scale * scale_override
+        target_w = max(60, int(aw * final_scale))
+        target_h = max(60, int(ah * final_scale))
+        hair_resized = cv2.resize(hair_rgba, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
 
-    if pts is not None and 234 in pts and 454 in pts:
-        face_center_x = (pts[234][0] + pts[454][0]) / 2.0
-    else:
-        face_center_x = forehead_pt[0]
+        # 5. Rotate by head roll angle
+        if abs(angle_deg) > 0.5:
+            M_rot = cv2.getRotationMatrix2D((target_w / 2, target_h / 2), angle_deg, 1.0)
+            cos = np.abs(M_rot[0, 0])
+            sin = np.abs(M_rot[0, 1])
+            nW = int((target_h * sin) + (target_w * cos))
+            nH = int((target_h * cos) + (target_w * sin))
+            M_rot[0, 2] += (nW / 2) - target_w / 2
+            M_rot[1, 2] += (nH / 2) - target_h / 2
+            hair_transformed = cv2.warpAffine(
+                hair_resized, M_rot, (nW, nH), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0)
+            )
+        else:
+            hair_transformed = hair_resized
 
-    paste_x = int(face_center_x - (prof["cx"] * final_scale))
-    paste_y = int(forehead_pt[1] - (prof["top_y"] * final_scale) + prof["y_adj"])
-    # Shift hair slightly upward to sit better on crown
-    paste_y -= int(final_scale * 10)
+        tw, th = hair_transformed.shape[1], hair_transformed.shape[0]
 
-    # Apply manual offsets
-    if offset_x is not None:
-        paste_x += int(offset_x)
-    if offset_y is not None:
-        paste_y += int(offset_y)
+        if pts is not None and 234 in pts and 454 in pts:
+            face_center_x = (pts[234][0] + pts[454][0]) / 2.0
+        else:
+            face_center_x = forehead_pt[0]
 
-    # 6. Clean Alpha Composition
-    hair_pil = Image.fromarray(hair_transformed, "RGBA")
-    canvas_pil = person_img.convert("RGBA")
-    W, H = person_img.size
+        paste_x = int(face_center_x - (prof["cx"] * final_scale))
+        paste_y = int(forehead_pt[1] - (prof["top_y"] * final_scale) + prof["y_adj"])
+        # Shift hair slightly upward to sit better on crown
+        paste_y -= int(final_scale * 10)
 
-    px = max(-tw + 10, min(W - 10, paste_x))
-    py = max(-th + 10, min(H - 10, paste_y))
+        # Apply manual offsets
+        if offset_x is not None:
+            paste_x += int(offset_x)
+        if offset_y is not None:
+            paste_y += int(offset_y)
 
-    canvas_overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    canvas_overlay.paste(hair_pil, (px, py), mask=hair_pil)
-    composited = Image.alpha_composite(canvas_pil, canvas_overlay)
-    final_pil = composited.convert("RGB")
+        # 6. Clean Alpha Composition
+        hair_pil = Image.fromarray(hair_transformed, "RGBA")
+        canvas_pil = person_img.convert("RGBA")
+        W, H = person_img.size
+
+        px = max(-tw + 10, min(W - 10, paste_x))
+        py = max(-th + 10, min(H - 10, paste_y))
+
+        canvas_overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        canvas_overlay.paste(hair_pil, (px, py), mask=hair_pil)
+        composited = Image.alpha_composite(canvas_pil, canvas_overlay)
+        final_pil = composited.convert("RGB")
 
     # 7. Save output
     tryon_id = f"tryon-hair-{uuid.uuid4().hex[:10]}"

@@ -9,6 +9,7 @@ Uses MediaPipe Face Detection (model_selection=1 for full-body range)
 - Nose Pins (Nostril ala #278 / #48)
 """
 import os
+import io
 import math
 import uuid
 import logging
@@ -153,6 +154,42 @@ def _detect_landmarks_two_stage(np_rgb: np.ndarray) -> Optional[Dict[int, np.nda
     """
     return detect_face_landmarks(np_rgb)
 
+def _call_cloud_accessory_sync(
+    endpoint: str,
+    person_img: Image.Image,
+    acc_img: Image.Image,
+    subcategory: str,
+    timeout_secs: float = 35.0,
+) -> Optional[Image.Image]:
+    import httpx
+    clean_endpoint = endpoint.strip().rstrip("/")
+    sub = subcategory.lower()
+    if any(k in sub for k in ["bag", "tote", "handbag", "purse", "hat", "shoes"]):
+        url = f"{clean_endpoint}/tryon-accessory"
+    else:
+        url = f"{clean_endpoint}/tryon-jewelry"
+
+    p_buf = io.BytesIO()
+    person_img.convert("RGB").save(p_buf, format="JPEG", quality=95)
+    g_buf = io.BytesIO()
+    acc_img.convert("RGB").save(g_buf, format="JPEG", quality=95)
+
+    files = {
+        "person_image": ("person.jpg", p_buf.getvalue(), "image/jpeg"),
+        "accessory_image": ("accessory.jpg", g_buf.getvalue(), "image/jpeg"),
+    }
+    data = {"subcategory": subcategory}
+    try:
+        with httpx.Client(timeout=timeout_secs) as client:
+            resp = client.post(url, files=files, data=data)
+            if resp.status_code == 200:
+                logger.info("Cloud accessory/jewelry tryon successful via %s", url)
+                return Image.open(io.BytesIO(resp.content)).convert("RGBA")
+    except Exception as exc:
+        logger.warning("Cloud accessory endpoint %s unreachable or skipped (%s)", url, exc)
+    return None
+
+
 
 
 def synthesize_accessory_tryon(
@@ -189,9 +226,28 @@ def synthesize_accessory_tryon(
     pose = detect_pose_landmarks(np_img)
     landmark_desc = "Facial Landmark Anchor"
 
-    if landmarks:
-        def pt(idx):
+    cloud_neural_used = False
+    if settings.catvton_endpoint:
+        try:
+            cloud_res = _call_cloud_accessory_sync(
+                endpoint=settings.catvton_endpoint,
+                person_img=person_img,
+                acc_img=acc_img,
+                subcategory=subcat,
+            )
+            if cloud_res:
+                canvas = cloud_res.resize((pw, ph), Image.Resampling.LANCZOS).convert("RGBA")
+                landmark_desc = f"Neural Diffusion ({'AnyDoor' if any(k in subcat for k in ['bag', 'tote', 'hat', 'shoes']) else 'IP-Adapter'} on GPU)"
+                cloud_neural_used = True
+        except Exception as exc:
+            logger.warning("Cloud neural accessory attempt failed (%s), using landmark fitting fallback", exc)
+
+    def pt(idx: int) -> np.ndarray:
+        if landmarks and idx in landmarks:
             return landmarks[idx]
+        return np.array([pw * 0.5, ph * 0.5], dtype=np.float32)
+
+    if not cloud_neural_used and landmarks:
 
         # ── 1. GLASSES & SUNGLASSES ──────────────────────────────────────────
         if "glass" in subcat or subcat == "glasses":
@@ -438,7 +494,7 @@ def synthesize_accessory_tryon(
             canvas.alpha_composite(resized_bag, (int(pw * 0.65), int(ph * 0.55)))
             landmark_desc = "Torso / Hip Anchor"
 
-    else:
+    elif not cloud_neural_used:
         logger.warning("No face detected by two-stage MediaPipe. Using anatomical estimate.")
         target_w = int(pw * 0.45)
         target_h = int(target_w * (acc_img.height / acc_img.width))
