@@ -130,7 +130,6 @@ def _determine_cloth_type(
         "item-outfit-2": "overall",   # Crimson Silk Gown
         "item-outfit-3": "upper",     # Casual Denim Jacket
         "item-outfit-4": "overall",   # Royal Embroidered Kurta
-        "item-outfit-5": "upper",     # Minimalist Linen Shirt
         "item-outfit-6": "upper",     # Puffer Coat / Blouse
         "item-outfit-7": "lower",     # Classic Blue Denim Jeans
     }
@@ -397,7 +396,6 @@ OUTFIT_ASSET_MAP = {
     "item-outfit-2": "crimson_silk_gown.png",   # Silk Evening Gown
     "item-outfit-3": "denim_jacket.png",        # Casual Denim Jacket
     "item-outfit-4": "embroidered_kurta.png",   # Traditional Kurta / Saree
-    "item-outfit-5": "shirt1.webp",             # Minimalist Linen Shirt
     "item-outfit-6": "blouse(top).webp",        # Puffer Coat / Outerwear / Blouse
     "item-outfit-7": "classic_blue_jeans.png",   # Classic Straight Blue Jeans
     # Category / name keywords

@@ -156,6 +156,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
 
     # Replacement-aware source resolution (one outfit at a time)
     person_img = None
+    source_url: Optional[str] = None
     source_doc_id: Optional[str] = None
     replay_docs: list = []
     dropped = False
@@ -164,7 +165,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
             user_id, request.person_image_id, stage="outfit", replace_all=True,
         )
         if source_doc is not None:
-            person_img, _url = load_image_from_doc(source_doc)
+            person_img, source_url = load_image_from_doc(source_doc)
             source_doc_id = source_doc.get("image_id")
     except Exception as exc:
         logger.warning("[Outfit] replay resolution failed: %s", exc)
@@ -197,7 +198,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
             "source": request.source,
             "parent_image_id": source_doc_id or request.person_image_id,
             "result_image_id": final_id or tryon_id,
-            "original_image_url": "",
+            "original_image_url": source_url or "",
             "garment_image_url": None,
             "result_image_url": result_url,
             "processing_note": f"Rebuilt look: new outfit applied, {len(replay_docs)} preserved stage(s) replayed.",
@@ -335,6 +336,8 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
                 override_x=request.position_x,
                 override_y=request.position_y,
                 override_scale=request.scale,
+                offset_x=request.offset_x,
+                offset_y=request.offset_y,
             )
     except Exception as exc:
         # Honest failure: no fake "completed" result pointing at the original photo

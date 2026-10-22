@@ -40,10 +40,8 @@ class OutfitTryOnResponse(BaseModel):
     parent_image_id: Optional[str] = None
     result_image_id: Optional[str] = None
     original_image_url: str
-    garment_image_url: str
+    garment_image_url: Optional[str] = None
     result_image_url: Optional[str] = None
-    tilted_image_url: Optional[str] = None
-    depth_map_url: Optional[str] = None
     processing_note: Optional[str] = None
     error: Optional[str] = None
     created_at: datetime

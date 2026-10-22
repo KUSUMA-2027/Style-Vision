@@ -214,9 +214,9 @@ def synthesize_accessory_tryon(
             rotated = resized.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
             
             # The bridge saddle sits centered right on the nasion #168
-            # Adjust so glasses rest ON the bridge, not below it
+            # Anchor vertical center at the nose bridge so glasses sit at eye level
             cx = p_bridge[0]
-            cy = p_bridge[1] - (target_h * 0.10)
+            cy = p_bridge[1]
             if override_x is not None:
                 cx = override_x * pw
             if override_y is not None:
