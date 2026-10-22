@@ -1,8 +1,16 @@
 """
 StyleVision Backend — FastAPI Application Entry Point
 """
+import logging
 import os
 from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:%(name)s:%(message)s",
+)
+logging.getLogger("pymongo").setLevel(logging.ERROR)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

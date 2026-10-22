@@ -163,6 +163,8 @@ def synthesize_accessory_tryon(
     override_x: Optional[float] = None,
     override_y: Optional[float] = None,
     override_scale: Optional[float] = None,
+    offset_x: Optional[float] = None,
+    offset_y: Optional[float] = None,
 ) -> Tuple[Image.Image, str, str, Optional[str], Optional[str]]:
     """
     Fits glasses, earrings, necklace, nose pin, bracelet, or tote bag using precision landmarks.
@@ -212,12 +214,18 @@ def synthesize_accessory_tryon(
             rotated = resized.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
             
             # The bridge saddle sits centered right on the nasion #168
+            # Adjust so glasses rest ON the bridge, not below it
             cx = p_bridge[0]
-            cy = p_bridge[1] + (target_h * 0.04)
+            cy = p_bridge[1] - (target_h * 0.10)
             if override_x is not None:
                 cx = override_x * pw
             if override_y is not None:
                 cy = override_y * ph
+            # Apply manual pixel offsets (only if no normalized override)
+            if override_x is None and offset_x is not None:
+                cx += offset_x
+            if override_y is None and offset_y is not None:
+                cy += offset_y
                 
             paste_x = int(cx - (rotated.width / 2))
             paste_y = int(cy - (rotated.height / 2))

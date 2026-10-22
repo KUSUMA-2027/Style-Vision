@@ -262,6 +262,19 @@ async def get_chain_docs(user_id: str, image_ref: Optional[str]) -> List[dict]:
     return docs
 
 
+def _item_title_from_doc(doc: dict) -> str:
+    meta = doc.get("metadata") or {}
+    return (
+        meta.get("style_name")
+        or meta.get("garment_name")
+        or meta.get("name")
+        or meta.get("subcategory")
+        or meta.get("makeup_type")
+        or doc.get("stage")
+        or "item"
+    )
+
+
 def _slot_of_doc(stage: str, doc: dict) -> Optional[str]:
     """The replaceable slot value of a stage-result document (e.g. accessory subcategory)."""
     meta = doc.get("metadata") or {}
@@ -369,4 +382,48 @@ async def get_session_stages(user_id: str, base_image_id: str) -> dict:
             "stage": current_doc.get("stage"),
             "created_at": current_doc.get("created_at"),
         }
-    return {"stages": stages, "current_image": current_image}
+
+    items = await get_live_items(user_id, current_image["image_id"]) if current_image else []
+
+    return {"stages": stages, "current_image": current_image, "items": items}
+
+
+async def get_live_items(user_id: str, image_ref: Optional[str]) -> List[dict]:
+    """
+    The styling items actually present in the look that produced `image_ref`:
+    walk the chain root→tip and collect stage results, excluding removal
+    markers (replaced/removed items are orphaned and thus excluded naturally).
+    """
+    items: List[dict] = []
+    if not image_ref:
+        return items
+    chain = await get_chain_docs(user_id, image_ref)
+    for doc in chain:
+        if doc.get("kind") != "stage_result":
+            continue
+        meta = doc.get("metadata") or {}
+        if meta.get("removed"):
+            continue
+        stage = doc.get("stage")
+        items.append(
+            {
+                "image_id": doc.get("image_id"),
+                "tryon_id": doc.get("tryon_id"),
+                "stage": stage,
+                "slot": _slot_of_doc(stage, doc) if stage else None,
+                "title": _item_title_from_doc(doc),
+                "url": doc.get("url"),
+                "created_at": doc.get("created_at"),
+            }
+        )
+    return items
+
+
+async def user_has_portrait(user_id: str) -> bool:
+    """True when the user has uploaded at least one original portrait."""
+    db = get_database()
+    reg = await db["images"].find_one({"user_id": user_id, "kind": "original"})
+    if reg:
+        return True
+    legacy = await db["uploads"].find_one({"user_id": user_id})
+    return legacy is not None

@@ -4,7 +4,7 @@ Covers outfit (CatVTON), accessories, makeup, and hairstyle.
 """
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
@@ -59,6 +59,8 @@ class AccessoryTryOnRequest(BaseModel):
     position_x: Optional[float] = Field(None, description="Manual X offset override (0-1 normalised)")
     position_y: Optional[float] = Field(None, description="Manual Y offset override (0-1 normalised)")
     scale: Optional[float] = Field(None, ge=0.1, le=5.0, description="Manual scale override")
+    offset_x: Optional[float] = Field(None, description="Manual X offset in pixels")
+    offset_y: Optional[float] = Field(None, description="Manual Y offset in pixels")
 
 
 class AccessoryTryOnResponse(BaseModel):
@@ -117,6 +119,9 @@ class HairstyleTryOnRequest(BaseModel):
     person_image_id: str
     style_item_id: str
     color_hex: Optional[str] = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    offset_x: Optional[float] = Field(None, description="Manual X offset in pixels")
+    offset_y: Optional[float] = Field(None, description="Manual Y offset in pixels")
+    scale: Optional[float] = Field(None, ge=0.5, le=2.0, description="Manual scale multiplier")
 
 
 class HairstyleTryOnResponse(BaseModel):
@@ -142,3 +147,26 @@ class TryOnErrorResponse(BaseModel):
     error: str
     code: str
     detail: Optional[str] = None
+
+
+# ── Remove Applied Item ───────────────────────────────────────────────────────
+
+class RemoveItemRequest(BaseModel):
+    person_image_id: str = Field(..., description="Current tip image id of the styling session")
+    stage: str = Field(..., description="Stage of the item to remove: outfit | accessories | makeup | hairstyle")
+    slot_value: Optional[str] = Field(
+        None,
+        description="Slot to remove, e.g. accessory subcategory (glasses) or makeup type (lipstick). "
+                    "Omit for outfit/hairstyle (single-slot stages).",
+    )
+
+
+class RemoveItemResponse(BaseModel):
+    status: TryOnStatus
+    removed_stage: str
+    removed_slot: Optional[str] = None
+    result_image_id: Optional[str] = None
+    result_image_url: Optional[str] = None
+    current_image_id: Optional[str] = None
+    remaining_items: List[dict] = []
+    error: Optional[str] = None

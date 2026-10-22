@@ -176,6 +176,9 @@ def synthesize_hairstyle_tryon(
     style_item_id: str,
     color_hex: Optional[str] = None,
     subcategory: Optional[str] = None,
+    offset_x: Optional[float] = None,
+    offset_y: Optional[float] = None,
+    scale_override: Optional[float] = None,
 ) -> Tuple[Image.Image, str, str]:
     """
     Fit hairstyle matched to head orientation and forehead anchor.
@@ -206,7 +209,8 @@ def synthesize_hairstyle_tryon(
         dx = p_right_ear[0] - p_left_ear[0]
         dy = p_right_ear[1] - p_left_ear[1]
         angle_deg = math.degrees(math.atan2(dy, dx))
-        forehead_pt = p_forehead
+        # Hair anchor: slightly above forehead (#10) so hair sits on head, not eyes
+        forehead_pt = np.array([p_forehead[0], p_forehead[1] - face_h * 0.08])
         landmark_summary = f"Forehead anchor #10, Ear span #234 <-> #454 (roll={angle_deg:.1f} deg)"
 
     # 1. Load hairstyle asset
@@ -226,9 +230,14 @@ def synthesize_hairstyle_tryon(
 
     # 4. Scale hairstyle to head dimensions
     ah, aw = hair_rgba.shape[:2]
-    scale = (face_w * prof["margin"]) / prof["cw"]
-    target_w = max(60, int(aw * scale))
-    target_h = max(60, int(ah * scale))
+    base_scale = (face_w * prof["margin"]) / prof["cw"]
+    # Also constrain by face height so hair doesn't overflow
+    h_scale = (face_h * 1.6) / ah
+    final_scale = min(base_scale, h_scale)
+    if scale_override is not None:
+        final_scale = final_scale * scale_override
+    target_w = max(60, int(aw * final_scale))
+    target_h = max(60, int(ah * final_scale))
     hair_resized = cv2.resize(hair_rgba, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
 
     # 5. Rotate by head roll angle
@@ -253,10 +262,16 @@ def synthesize_hairstyle_tryon(
     else:
         face_center_x = forehead_pt[0]
 
-    paste_x = int(face_center_x - (prof["cx"] * scale))
-    paste_y = int(forehead_pt[1] - (prof["top_y"] * scale) + prof["y_adj"])
+    paste_x = int(face_center_x - (prof["cx"] * final_scale))
+    paste_y = int(forehead_pt[1] - (prof["top_y"] * final_scale) + prof["y_adj"])
 
-    # 6. Clean Alpha Composition (Natural fringe and bangs preserved without artificial cutouts)
+    # Apply manual offsets
+    if offset_x is not None:
+        paste_x += int(offset_x)
+    if offset_y is not None:
+        paste_y += int(offset_y)
+
+    # 6. Clean Alpha Composition
     hair_pil = Image.fromarray(hair_transformed, "RGBA")
     canvas_pil = person_img.convert("RGBA")
     W, H = person_img.size

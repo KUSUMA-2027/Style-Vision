@@ -28,6 +28,8 @@ from app.models.tryon import (
     MakeupTryOnResponse,
     HairstyleTryOnRequest,
     HairstyleTryOnResponse,
+    RemoveItemRequest,
+    RemoveItemResponse,
 )
 from app.config import get_settings
 from app.utils.security import get_current_user
@@ -43,11 +45,13 @@ from app.services.image_registry import (
     get_session_stages,
     resolve_stage_replay,
     load_image_from_doc,
+    user_has_portrait,
+    get_live_items,
+    STAGE_ORDER,
 )
 from app.services.stage_replay import (
     ops_from_docs,
-    execute_replay_ops,
-    save_stage_composite,
+    rebuild_and_register_chain,
 )
 from app.database import get_database
 
@@ -55,6 +59,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/tryon", tags=["Virtual Try-On"])
 settings = get_settings()
+
+PORTRAIT_REQUIRED_DETAIL = (
+    "No portrait photo found for your account. Please upload your photo first — "
+    "styles can only be applied to your own picture."
+)
+
+
+async def _enforce_portrait(user_id: str) -> None:
+    """Reject styling requests from users who have not uploaded a portrait."""
+    if not await user_has_portrait(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=PORTRAIT_REQUIRED_DETAIL,
+        )
 
 
 # ── Try-on job persistence (Mongo) ────────────────────────────────────────────
@@ -98,6 +116,7 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
     re-applying (replaying) all preserved accessory/makeup/hairstyle stages on top.
     """
     user_id = current_user["sub"]
+    await _enforce_portrait(user_id)
     db = get_database()
     garment_id = request.outfit_id if request.source == "wardrobe" else request.style_item_id
     if not garment_id:
@@ -151,66 +170,39 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
         logger.warning("[Outfit] replay resolution failed: %s", exc)
 
     if dropped and person_img is not None:
-        # Rebuild: new outfit first, then replay preserved stages on top
-        intermediate = await synthesize_outfit_tryon(
-            person_image_id="replay",
-            garment_id=garment_id,
-            source=request.source,
-            garment_color=garment_color,
-            garment_name=garment_name,
-            garment_image_path=garment_image_path,
-            garment_category=garment_category,
-            explicit_cloth_type=request.cloth_type,
-            user_id=None,
-            person_image_override=person_img,
-            register_result=False,
+        # Rebuild: new outfit first, then replay preserved stages on top.
+        # Every rebuilt layer is registered as its own chain doc so removals
+        # and future replacements keep working.
+        tryon_id = f"tryon-outfit-{uuid.uuid4().hex[:10]}"
+        ops = [{"stage": "outfit", "params": {
+            "garment_id": garment_id,
+            "source": request.source,
+            "cloth_type": request.cloth_type,
+            "garment_name": garment_name,
+        }}]
+        ops.extend(ops_from_docs(replay_docs))
+        final_img, final_id, result_url = await rebuild_and_register_chain(
+            user_id, source_doc, ops, final_image_id=tryon_id,
         )
-        composite = intermediate.get("composite_image")
-        if composite is None:
+        if final_img is None or not result_url:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Outfit synthesis failed during rebuild.",
+                detail="Outfit rebuild failed — could not reconstruct your look.",
             )
-        final_img = await execute_replay_ops(composite, ops_from_docs(replay_docs))
-
-        from app.services.stage_replay import save_stage_composite
-        tryon_id = f"tryon-outfit-{uuid.uuid4().hex[:10]}"
-        result_url = save_stage_composite(final_img, tryon_id)
         now = datetime.now(timezone.utc)
         result = {
             "tryon_id": tryon_id,
             "status": TryOnStatus.completed,
-            "mode": intermediate.get("mode", TryOnMode.prototype),
+            "mode": TryOnMode.prototype,
             "source": request.source,
             "parent_image_id": source_doc_id or request.person_image_id,
-            "result_image_id": tryon_id,
-            "original_image_url": intermediate.get("original_image_url") or "",
-            "garment_image_url": intermediate.get("garment_image_url"),
+            "result_image_id": final_id or tryon_id,
+            "original_image_url": "",
+            "garment_image_url": None,
             "result_image_url": result_url,
-            "processing_note": intermediate.get("processing_note"),
+            "processing_note": f"Rebuilt look: new outfit applied, {len(replay_docs)} preserved stage(s) replayed.",
             "created_at": now,
         }
-        try:
-            await register_stage_result(
-                user_id=user_id,
-                image_id=tryon_id,
-                stage="outfit",
-                parent_image_id=source_doc_id or request.person_image_id,
-                tryon_id=tryon_id,
-                url=result_url,
-                metadata={
-                    "garment_id": garment_id,
-                    "garment_name": garment_name,
-                    "source": request.source,
-                    "cloth_type": request.cloth_type,
-                    "mode": str(intermediate.get("mode", "prototype")),
-                    "processing_note": intermediate.get("processing_note"),
-                    "parent_url": intermediate.get("original_image_url") or "",
-                    "replayed": [d.get("image_id") for d in replay_docs],
-                },
-            )
-        except Exception as reg_err:
-            logger.warning("[Outfit] Failed to register replayed result: %s", reg_err)
         await _save_job({**result, "user_id": user_id, "garment_name": garment_name})
         return OutfitTryOnResponse(**result)
 
@@ -270,6 +262,7 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
     earlier styling are preserved via replay.
     """
     user_id = current_user["sub"]
+    await _enforce_portrait(user_id)
 
     custom_url = request.custom_image_url
     if not custom_url:
@@ -315,7 +308,8 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
 
     try:
         if dropped:
-            # Rebuild: apply preserved items + the new accessory onto the pre-replacement source
+            # Rebuild: preserved items + the new accessory, each registered as
+            # its own chain doc so removals and future replacements keep working
             ops = ops_from_docs(replay_docs)
             ops.append({
                 "stage": "accessories",
@@ -325,9 +319,13 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
                     "custom_url": custom_url,
                 },
             })
-            composite = await execute_replay_ops(person_img, ops)
+            composite, final_id, result_url = await rebuild_and_register_chain(
+                user_id, source_doc, ops, final_image_id=tryon_id,
+            )
+            if composite is None or not result_url:
+                raise RuntimeError("Rebuild failed — could not reconstruct your look.")
             landmark = "Replay Rebuild (replacement)"
-            result_url = save_stage_composite(composite, tryon_id)
+            result_image_id = final_id or tryon_id
         else:
             composite, landmark, result_url, closeup_result_url, closeup_orig_url = synthesize_accessory_tryon(
                 person_img=person_img,
@@ -365,25 +363,28 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
             created_at=created_at,
         )
 
-    result_image_id = _result_image_id_from_url(result_url) or tryon_id
-    try:
-        await register_stage_result(
-            user_id=user_id,
-            image_id=result_image_id,
-            stage="accessories",
-            parent_image_id=parent_image_id,
-            tryon_id=tryon_id,
-            url=result_url,
-            metadata={
-                "subcategory": request.subcategory,
-                "style_item_id": request.style_item_id,
-                "landmark_used": landmark,
-                "custom_url": custom_url,
-                "parent_url": source_url,
-            },
-        )
-    except Exception as reg_err:
-        logger.warning("[Accessory] Failed to register result image: %s", reg_err)
+    if not dropped:
+        result_image_id = _result_image_id_from_url(result_url) or tryon_id
+        try:
+            await register_stage_result(
+                user_id=user_id,
+                image_id=result_image_id,
+                stage="accessories",
+                parent_image_id=parent_image_id,
+                tryon_id=tryon_id,
+                url=result_url,
+                metadata={
+                    "subcategory": request.subcategory,
+                    "style_item_id": request.style_item_id,
+                    "landmark_used": landmark,
+                    "custom_url": custom_url,
+                    "parent_url": source_url,
+                },
+            )
+        except Exception as reg_err:
+            logger.warning("[Accessory] Failed to register result image: %s", reg_err)
+    else:
+        result_image_id = _result_image_id_from_url(result_url) or tryon_id
 
     # Auto-generate depth tilt variant for the result
     tilted_url = None
@@ -455,6 +456,7 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
     full-transfer look replaces ALL previously applied makeup.
     """
     user_id = current_user["sub"]
+    await _enforce_portrait(user_id)
 
     # Replacement-aware source resolution
     person_img: Optional[object] = None
@@ -492,7 +494,7 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
 
     try:
         if dropped:
-            # Rebuild: preserved items + the new makeup look onto the pre-replacement source
+            # Rebuild: preserved items + the new makeup look, chain-registered
             ops = ops_from_docs(replay_docs)
             ops.append({
                 "stage": "makeup",
@@ -503,11 +505,13 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
                     "finish": request.finish,
                 },
             })
-            composite = await execute_replay_ops(person_img, ops)
+            composite, final_id, result_url = await rebuild_and_register_chain(
+                user_id, source_doc, ops,
+            )
+            if composite is None or not result_url:
+                raise RuntimeError("Rebuild failed — could not reconstruct your look.")
             landmark_summary = "Replay Rebuild (replacement)"
-            result_url = save_stage_composite(composite, f"tryon-mu-{uuid.uuid4().hex[:10]}")
-            import os as _os
-            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
+            tryon_id = final_id
         elif m_type == "full_transfer":
             # Complete reference/holistic look transfer: combines lips, eyelids, and cheeks
             res_pil, _, _ = synthesize_makeup_tryon(
@@ -559,24 +563,25 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
         )
 
     result_image_id = _result_image_id_from_url(result_url) or tryon_id
-    try:
-        await register_stage_result(
-            user_id=user_id,
-            image_id=result_image_id,
-            stage="makeup",
-            parent_image_id=parent_image_id,
-            tryon_id=tryon_id,
-            url=result_url,
-            metadata={
-                "makeup_type": m_type,
-                "color_hex": color_hex,
-                "intensity": request.intensity,
-                "finish": request.finish,
-                "parent_url": source_url,
-            },
-        )
-    except Exception as reg_err:
-        logger.warning("[Makeup] Failed to register result image: %s", reg_err)
+    if not dropped:
+        try:
+            await register_stage_result(
+                user_id=user_id,
+                image_id=result_image_id,
+                stage="makeup",
+                parent_image_id=parent_image_id,
+                tryon_id=tryon_id,
+                url=result_url,
+                metadata={
+                    "makeup_type": m_type,
+                    "color_hex": color_hex,
+                    "intensity": request.intensity,
+                    "finish": request.finish,
+                    "parent_url": source_url,
+                },
+            )
+        except Exception as reg_err:
+            logger.warning("[Makeup] Failed to register result image: %s", reg_err)
 
     # Auto-generate depth tilt variant for the result
     tilted_url = None
@@ -630,6 +635,7 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
     any previously applied hairstyle while preserving all other styling.
     """
     user_id = current_user["sub"]
+    await _enforce_portrait(user_id)
 
     # Replacement-aware source resolution (only one hairstyle at a time)
     person_img: Optional[object] = None
@@ -675,7 +681,7 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
 
     try:
         if dropped:
-            # Rebuild: preserved items + the new hairstyle onto the pre-replacement source
+            # Rebuild: preserved items + the new hairstyle, chain-registered
             ops = ops_from_docs(replay_docs)
             ops.append({
                 "stage": "hairstyle",
@@ -685,16 +691,22 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
                     "style_name": style_name,
                 },
             })
-            composite = await execute_replay_ops(person_img, ops)
-            result_url = save_stage_composite(composite, f"tryon-hair-{uuid.uuid4().hex[:10]}")
-            import os as _os
-            tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
+            composite, final_id, result_url = await rebuild_and_register_chain(
+                user_id, source_doc, ops,
+            )
+            if composite is None or not result_url:
+                raise RuntimeError("Rebuild failed — could not reconstruct your look.")
+            result_image_id = final_id
+            tryon_id = final_id
         else:
             res_pil, landmark_desc, result_url, closeup_result_url, closeup_orig_url = synthesize_hairstyle_tryon(
                 person_img=person_img,
                 style_item_id=request.style_item_id,
                 color_hex=request.color_hex,
                 subcategory=subcategory,
+                offset_x=request.offset_x,
+                offset_y=request.offset_y,
+                scale_override=request.scale,
             )
             import os as _os
             tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
@@ -727,23 +739,24 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
         )
 
     result_image_id = _result_image_id_from_url(result_url) or tryon_id
-    try:
-        await register_stage_result(
-            user_id=user_id,
-            image_id=result_image_id,
-            stage="hairstyle",
-            parent_image_id=parent_image_id,
-            tryon_id=tryon_id,
-            url=result_url,
-            metadata={
-                "style_item_id": request.style_item_id,
-                "style_name": style_name,
-                "color_hex": request.color_hex,
-                "parent_url": source_url,
-            },
-        )
-    except Exception as reg_err:
-        logger.warning("[Hairstyle] Failed to register result image: %s", reg_err)
+    if not dropped:
+        try:
+            await register_stage_result(
+                user_id=user_id,
+                image_id=result_image_id,
+                stage="hairstyle",
+                parent_image_id=parent_image_id,
+                tryon_id=tryon_id,
+                url=result_url,
+                metadata={
+                    "style_item_id": request.style_item_id,
+                    "style_name": style_name,
+                    "color_hex": request.color_hex,
+                    "parent_url": source_url,
+                },
+            )
+        except Exception as reg_err:
+            logger.warning("[Hairstyle] Failed to register result image: %s", reg_err)
 
     # Auto-generate depth tilt variant for the result
     tilted_url = None
@@ -808,6 +821,109 @@ async def get_styling_session_stages(base_image_id: str, current_user: dict = De
     user_id = current_user["sub"]
     session_data = await get_session_stages(user_id, base_image_id)
     return {"base_image_id": base_image_id, **session_data}
+
+
+@router.post(
+    "/remove",
+    response_model=RemoveItemResponse,
+    summary="Remove an applied item (accessory, makeup, outfit, or hairstyle) from the current look",
+)
+async def remove_tryon_item(request: RemoveItemRequest, current_user: dict = Depends(get_current_user)):
+    """
+    Strip a previously applied item from the styling chain and rebuild the
+    image WITHOUT it — while re-applying (replaying) every other preserved
+    item on top. Unlike replacement, no new item is composited afterwards.
+    """
+    user_id = current_user["sub"]
+    await _enforce_portrait(user_id)
+
+    stage = (request.stage or "").strip().lower()
+    if stage not in STAGE_ORDER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid stage '{request.stage}'. Must be one of: {', '.join(STAGE_ORDER)}.",
+        )
+
+    # Slot semantics: outfit/hairstyle are single-slot (whole-stage removal);
+    # accessories/makeup remove by slot; makeup without a slot removes ALL makeup.
+    replace_all = False
+    slot = request.slot_value
+    if stage in ("outfit", "hairstyle"):
+        replace_all = True
+        slot = None
+    elif stage == "makeup" and not slot:
+        replace_all = True
+    elif not slot:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'slot_value' is required to remove an item from the {stage} stage.",
+        )
+
+    source_doc, replay_docs, dropped = await resolve_stage_replay(
+        user_id, request.person_image_id, stage=stage,
+        replace_all=replace_all, slot_value=slot,
+    )
+    if not dropped:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That item is not part of your current look.",
+        )
+
+    person_img, source_url = load_image_from_doc(source_doc)
+    if person_img is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not load the underlying image for rebuild.",
+        )
+
+    created_at = datetime.now(timezone.utc)
+    tryon_id = f"tryon-rm-{uuid.uuid4().hex[:10]}"
+    try:
+        # Rebuild the chain WITHOUT the removed item: each preserved item is
+        # re-applied and registered as its own chain doc
+        final_img, final_id, result_url = await rebuild_and_register_chain(
+            user_id, source_doc, ops_from_docs(replay_docs),
+        )
+        if final_img is None or not final_id or not result_url:
+            raise RuntimeError("Could not load the underlying image for rebuild.")
+    except Exception as exc:
+        logger.error("[Remove] rebuild failed: %s", exc)
+        return RemoveItemResponse(
+            status=TryOnStatus.failed,
+            removed_stage=stage,
+            removed_slot=slot,
+            error=f"Could not rebuild the look without this item: {exc}",
+        )
+
+    try:
+        await register_stage_result(
+            user_id=user_id,
+            image_id=tryon_id,
+            stage=stage,
+            parent_image_id=final_id,
+            tryon_id=tryon_id,
+            url=result_url,
+            metadata={
+                "removed": True,
+                "removed_slot": slot,
+                "removed_stage": stage,
+                "parent_url": result_url,
+                "replayed": [d.get("image_id") for d in replay_docs],
+            },
+        )
+    except Exception as reg_err:
+        logger.warning("[Remove] Failed to register removal result: %s", reg_err)
+
+    remaining = await get_live_items(user_id, tryon_id)
+    return RemoveItemResponse(
+        status=TryOnStatus.completed,
+        removed_stage=stage,
+        removed_slot=slot,
+        result_image_id=tryon_id,
+        result_image_url=result_url,
+        current_image_id=tryon_id,
+        remaining_items=remaining,
+    )
 
 
 @router.get(

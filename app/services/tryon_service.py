@@ -831,6 +831,11 @@ async def synthesize_outfit_tryon(
                 col_offset = mid_col.min() if len(mid_col) > 0 else 0
                 paste_y = int(collar_y - col_offset)
 
+                # Clamp paste_y so garment collar sits at/above neckline (never below chin)
+                paste_y = max(int(chin_y + face_h * 0.10), paste_y)
+                # Keep garment within image bounds horizontally
+                paste_x = max(0, min(pw - max(10, target_w), paste_x))
+
             resized_garm = garment_img.resize((max(10, target_w), max(10, target_h)), Image.Resampling.LANCZOS)
 
             # 3. Composite Garment Cleanly on Authentic Canvas
@@ -852,18 +857,21 @@ async def synthesize_outfit_tryon(
             # Fallback when no face/body landmarks detected
             if cloth_type == "overall":
                 target_width = int(pw * 0.80)
-                paste_y = int(ph * 0.16)
+                paste_y = int(ph * 0.12)
             elif cloth_type == "lower":
                 target_width = int(pw * 0.72)
-                paste_y = int(ph * 0.45)
+                paste_y = int(ph * 0.50)
             else:
                 target_width = int(pw * 0.68)
-                paste_y = int(ph * 0.18)
+                paste_y = int(ph * 0.15)
+
+            # Clamp paste_y within image bounds
+            paste_y = max(0, min(ph - 10, paste_y))
 
             aspect = garment_img.height / max(1, garment_img.width)
             target_height = int(target_width * aspect)
             resized_garment = garment_img.resize((max(10, target_width), max(10, target_height)), Image.Resampling.LANCZOS)
-            paste_x = (pw - target_width) // 2
+            paste_x = max(0, (pw - target_width) // 2)
 
             overlay = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
             overlay.paste(resized_garment, (paste_x, paste_y))
