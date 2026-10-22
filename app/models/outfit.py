@@ -33,6 +33,13 @@ class WardrobeCategory(str, Enum):
         return cls.top
 
 
+class WardrobeItemUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    category: Optional[WardrobeCategory] = None
+    color: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
 # ── Response for User's Uploaded Garment ───────────────────────────────────────
 
 class WardrobeItemResponse(BaseModel):

@@ -1,7 +1,7 @@
 """
 StyleVision — Wardrobe Router ("My Digital Closet")
 Allows users to upload photos of their own clothes/dresses, view their private
-wardrobe collection, and delete garments. Backed by MongoDB 'outfits' collection.
+wardrobe collection, update details, and delete garments. Backed by MongoDB 'outfits' collection.
 """
 from datetime import datetime, timezone
 import io
@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, s
 from app.models.outfit import (
     WardrobeCategory,
     WardrobeItemResponse,
+    WardrobeItemUpdateRequest,
     WardrobeListResponse,
     WardrobeItemDeleteResponse,
 )
@@ -139,10 +140,110 @@ async def list_wardrobe_items(current_user: dict = Depends(get_current_user)):
                 uploaded_at=doc["uploaded_at"],
                 try_on_result=doc.get("try_on_result"),
                 color=doc.get("color"),
+                notes=doc.get("notes"),
             )
         )
 
     return WardrobeListResponse(items=results, total=len(results))
+
+
+@router.get(
+    "/{outfit_id}",
+    response_model=WardrobeItemResponse,
+    summary="Get details of a specific wardrobe garment",
+)
+async def get_wardrobe_item(outfit_id: str, current_user: dict = Depends(get_current_user)):
+    """Retrieve details of a single clothing item owned by the authenticated user."""
+    user_id = current_user["sub"]
+    db = get_database()
+    col = db["outfits"]
+
+    doc = await col.find_one({"outfit_id": outfit_id, "user_id": user_id})
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Garment '{outfit_id}' not found in your wardrobe.",
+        )
+
+    return WardrobeItemResponse(
+        outfit_id=doc["outfit_id"],
+        user_id=doc.get("user_id", user_id),
+        name=doc["name"],
+        category=WardrobeCategory(doc["category"]),
+        outfit_image=doc["outfit_image"],
+        uploaded_at=doc["uploaded_at"],
+        try_on_result=doc.get("try_on_result"),
+        color=doc.get("color"),
+        notes=doc.get("notes"),
+    )
+
+
+@router.put(
+    "/{outfit_id}",
+    response_model=WardrobeItemResponse,
+    summary="Update garment name, category, or color",
+)
+async def update_wardrobe_item(
+    outfit_id: str,
+    request: WardrobeItemUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update metadata for an existing garment in the user's wardrobe."""
+    user_id = current_user["sub"]
+    db = get_database()
+    col = db["outfits"]
+
+    update_fields = {}
+    if request.name is not None:
+        update_fields["name"] = request.name.strip()
+    if request.category is not None:
+        update_fields["category"] = request.category.value
+    if request.color is not None:
+        update_fields["color"] = request.color.strip()
+    if request.notes is not None:
+        update_fields["notes"] = request.notes.strip()
+
+    if not update_fields:
+        doc = await col.find_one({"outfit_id": outfit_id, "user_id": user_id})
+        if not doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Garment '{outfit_id}' not found in your wardrobe.",
+            )
+        return WardrobeItemResponse(
+            outfit_id=doc["outfit_id"],
+            user_id=doc.get("user_id", user_id),
+            name=doc["name"],
+            category=WardrobeCategory(doc["category"]),
+            outfit_image=doc["outfit_image"],
+            uploaded_at=doc["uploaded_at"],
+            try_on_result=doc.get("try_on_result"),
+            color=doc.get("color"),
+            notes=doc.get("notes"),
+        )
+
+    doc = await col.find_one_and_update(
+        {"outfit_id": outfit_id, "user_id": user_id},
+        {"$set": update_fields},
+        return_document=True,
+    )
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Garment '{outfit_id}' not found in your wardrobe.",
+        )
+
+    return WardrobeItemResponse(
+        outfit_id=doc["outfit_id"],
+        user_id=doc.get("user_id", user_id),
+        name=doc["name"],
+        category=WardrobeCategory(doc["category"]),
+        outfit_image=doc["outfit_image"],
+        uploaded_at=doc["uploaded_at"],
+        try_on_result=doc.get("try_on_result"),
+        color=doc.get("color"),
+        notes=doc.get("notes"),
+    )
 
 
 @router.delete(
@@ -164,11 +265,15 @@ async def delete_wardrobe_item(outfit_id: str, current_user: dict = Depends(get_
         )
 
     # Clean up file on disk if local
-    image_rel = doc.get("outfit_image", "").lstrip("/")
-    if image_rel.startswith("uploads"):
-        delete_file_safe(image_rel)
+    image_rel = doc.get("outfit_image", "").lstrip("/").replace("/", os.sep)
+    abs_path = os.path.join(settings.backend_dir, image_rel)
+    if os.path.isfile(abs_path):
+        try:
+            os.remove(abs_path)
+        except Exception:
+            pass
 
-    await col.delete_one({"outfit_id": outfit_id})
+    await col.delete_one({"outfit_id": outfit_id, "user_id": user_id})
 
     return WardrobeItemDeleteResponse(
         message="Garment successfully removed from your digital wardrobe.",

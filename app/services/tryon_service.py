@@ -70,7 +70,7 @@ async def generate_depth_variants(
                 image_id=f"{image_id}_tilt",
                 stage="depth_tilt",
                 parent_image_id=image_id,
-                tryon_id=tryon_id,
+                tryon_id=f"{tryon_id}_tilt" if tryon_id else None,
                 url=tilt_url,
                 metadata={
                     "source_image_id": image_id,
@@ -525,7 +525,10 @@ async def _call_catvton_cloud(
     import asyncio as _asyncio
 
     clean_endpoint = endpoint.strip().rstrip("/")
-    url = f"{clean_endpoint}/tryon"
+    if clean_endpoint.endswith("/tryon"):
+        url = clean_endpoint
+    else:
+        url = f"{clean_endpoint}/tryon"
     logger.info("Calling CatVTON Cloud GPU endpoint: %s with cloth_type=%s", url, cloth_type)
 
     p_buf = io.BytesIO()

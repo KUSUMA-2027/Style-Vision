@@ -29,8 +29,9 @@ def apply_depth_tilt(
     """
     try:
         img_rgba = image.convert("RGBA")
-        img_rgb = np.array(img_rgba.convert("RGB"))
-        h, w = img_rgb.shape[:2]
+        img_rgba_np = np.array(img_rgba)
+        h, w = img_rgba_np.shape[:2]
+        img_rgb = img_rgba_np[:, :, :3]
 
         depth = estimate_depth(Image.fromarray(img_rgb), model_type=model_type)
         depth_norm = depth
@@ -50,7 +51,7 @@ def apply_depth_tilt(
         map_y = (yy + shift_y).astype(np.float32)
 
         tilted = cv2.remap(
-            img_rgba,
+            img_rgba_np,
             map_x,
             map_y,
             interpolation=cv2.INTER_LINEAR,

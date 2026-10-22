@@ -26,9 +26,14 @@ class UploadedImageResponse(BaseModel):
 class SaveLookRequest(BaseModel):
     tryon_id: str = Field(..., description="ID of a completed try-on result")
     title: Optional[str] = Field(None, max_length=200)
+    category: Optional[str] = Field(None, description="Optional category: outfit | accessories | makeup | hairstyle | complete")
     base_image_id: Optional[str] = Field(None, description="Original portrait that seeded the styling session")
     final_image_id: Optional[str] = Field(None, description="Latest chained image id of the complete look")
     stages: Optional[List[dict]] = Field(None, description="Per-stage metadata: [{stage, tryon_id, result_image_url, ...}]")
+
+
+class UpdateLookRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=200)
 
 
 class SavedLookResponse(BaseModel):

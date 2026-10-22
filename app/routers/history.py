@@ -1,6 +1,6 @@
 """
 StyleVision — Saved Looks / History Router
-Saves, retrieves, and deletes virtual try-on styling results for users via MongoDB.
+Saves, retrieves, updates, and deletes virtual try-on styling results for users via MongoDB.
 JWT-protected and strictly user-scoped: users only ever see their own looks.
 """
 from datetime import datetime, timezone
@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.models.history import (
     SaveLookRequest,
+    UpdateLookRequest,
     SavedLookResponse,
     HistoryListResponse,
     DeleteResponse,
@@ -42,12 +43,18 @@ async def list_saved_looks(
     cursor = col.find(query).sort("created_at", -1)
     results = []
     async for doc in cursor:
+        raw_cat = doc.get("category", "outfit")
+        try:
+            cat_enum = TryOnCategory(raw_cat)
+        except ValueError:
+            cat_enum = TryOnCategory.outfit
+
         results.append(
             SavedLookResponse(
                 look_id=doc["look_id"],
                 user_id=doc.get("user_id", user_id),
                 title=doc.get("title", "Untitled Look"),
-                category=TryOnCategory(doc["category"]),
+                category=cat_enum,
                 original_image_url=doc.get("original_image_url", ""),
                 result_image_url=doc.get("result_image_url", ""),
                 style_item_name=doc.get("style_item_name", "Custom Style"),
@@ -61,6 +68,96 @@ async def list_saved_looks(
     return HistoryListResponse(
         looks=results,
         total=len(results),
+    )
+
+
+@router.get(
+    "/{look_id}",
+    response_model=SavedLookResponse,
+    summary="Get details of a single saved styling look",
+)
+async def get_saved_look(look_id: str, current_user: dict = Depends(get_current_user)):
+    """Retrieve a single saved look owned by the authenticated user."""
+    user_id = current_user["sub"]
+    db = get_database()
+    col = db["saved_looks"]
+
+    doc = await col.find_one({"look_id": look_id, "user_id": user_id})
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Saved look '{look_id}' not found in your lookbook.",
+        )
+
+    raw_cat = doc.get("category", "outfit")
+    try:
+        cat_enum = TryOnCategory(raw_cat)
+    except ValueError:
+        cat_enum = TryOnCategory.outfit
+
+    return SavedLookResponse(
+        look_id=doc["look_id"],
+        user_id=doc.get("user_id", user_id),
+        title=doc.get("title", "Untitled Look"),
+        category=cat_enum,
+        original_image_url=doc.get("original_image_url", ""),
+        result_image_url=doc.get("result_image_url", ""),
+        style_item_name=doc.get("style_item_name", "Custom Style"),
+        base_image_id=doc.get("base_image_id"),
+        final_image_id=doc.get("final_image_id"),
+        stages=doc.get("stages", []),
+        created_at=doc.get("created_at", datetime.now(timezone.utc)),
+    )
+
+
+@router.put(
+    "/{look_id}",
+    response_model=SavedLookResponse,
+    summary="Update title of a saved look",
+)
+async def update_saved_look(
+    look_id: str,
+    request: UpdateLookRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update title or notes for a saved look in the user's lookbook."""
+    user_id = current_user["sub"]
+    db = get_database()
+    col = db["saved_looks"]
+
+    update_fields = {}
+    if request.title:
+        update_fields["title"] = request.title.strip()
+
+    doc = await col.find_one_and_update(
+        {"look_id": look_id, "user_id": user_id},
+        {"$set": update_fields},
+        return_document=True,
+    )
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Saved look '{look_id}' not found in your lookbook.",
+        )
+
+    raw_cat = doc.get("category", "outfit")
+    try:
+        cat_enum = TryOnCategory(raw_cat)
+    except ValueError:
+        cat_enum = TryOnCategory.outfit
+
+    return SavedLookResponse(
+        look_id=doc["look_id"],
+        user_id=doc.get("user_id", user_id),
+        title=doc.get("title", "Untitled Look"),
+        category=cat_enum,
+        original_image_url=doc.get("original_image_url", ""),
+        result_image_url=doc.get("result_image_url", ""),
+        style_item_name=doc.get("style_item_name", "Custom Style"),
+        base_image_id=doc.get("base_image_id"),
+        final_image_id=doc.get("final_image_id"),
+        stages=doc.get("stages", []),
+        created_at=doc.get("created_at", datetime.now(timezone.utc)),
     )
 
 
@@ -80,11 +177,26 @@ async def save_look(request: SaveLookRequest, current_user: dict = Depends(get_c
     title = request.title or "My Virtual Style"
     now = datetime.now(timezone.utc)
 
+    # 1. Look up job from tryons collection
     job = await db["tryons"].find_one({"tryon_id": request.tryon_id, "user_id": user_id})
 
-    cat_val = job.get("category") if job else None
+    # 2. If not in tryons collection, check images collection
+    img_doc = None
+    if not job:
+        img_doc = await db["images"].find_one(
+            {"user_id": user_id, "$or": [{"image_id": request.tryon_id}, {"tryon_id": request.tryon_id}]}
+        )
+
+    # Determine category
+    cat_val = request.category
+    if not cat_val and job:
+        cat_val = job.get("category")
+    if not cat_val and img_doc:
+        cat_val = img_doc.get("stage")
     if not cat_val:
-        if "acc" in request.tryon_id:
+        if request.stages and len(request.stages) > 1:
+            cat_val = "complete"
+        elif "acc" in request.tryon_id:
             cat_val = "accessories"
         elif "mu" in request.tryon_id:
             cat_val = "makeup"
@@ -93,15 +205,58 @@ async def save_look(request: SaveLookRequest, current_user: dict = Depends(get_c
         else:
             cat_val = "outfit"
 
-    orig_url = (job or {}).get("original_image_url") or ""
-    res_url = (job or {}).get("result_image_url") or f"/uploads/tryon/{request.tryon_id}.png"
-    style_name = (job or {}).get("subcategory") or (job or {}).get("garment_name") or title
+    # Determine result image URL
+    res_url = None
+    if request.final_image_id:
+        final_doc = await db["images"].find_one({"user_id": user_id, "image_id": request.final_image_id})
+        if final_doc and final_doc.get("url"):
+            res_url = final_doc["url"]
+
+    if not res_url and job:
+        res_url = job.get("result_image_url")
+    if not res_url and img_doc:
+        res_url = img_doc.get("url")
+    if not res_url:
+        res_url = f"/uploads/tryon/{request.tryon_id}.png"
+
+    # Determine original base portrait URL
+    orig_url = None
+    if request.base_image_id:
+        base_doc = await db["images"].find_one({"user_id": user_id, "image_id": request.base_image_id})
+        if not base_doc:
+            base_doc = await db["uploads"].find_one({"user_id": user_id, "image_id": request.base_image_id})
+        if base_doc and base_doc.get("url"):
+            orig_url = base_doc["url"]
+
+    if not orig_url and job:
+        orig_url = job.get("original_image_url")
+    if not orig_url:
+        latest_orig = await db["images"].find_one({"user_id": user_id, "kind": "original"}, sort=[("created_at", -1)])
+        if latest_orig and latest_orig.get("url"):
+            orig_url = latest_orig["url"]
+        else:
+            orig_url = ""
+
+    # Style name
+    style_name = None
+    if job:
+        style_name = job.get("subcategory") or job.get("garment_name") or job.get("style_name")
+    if not style_name and img_doc:
+        meta = img_doc.get("metadata", {})
+        style_name = meta.get("subcategory") or meta.get("garment_name") or meta.get("style_name")
+    if not style_name:
+        style_name = "Complete Look" if cat_val == "complete" else title
+
+    try:
+        cat_enum = TryOnCategory(cat_val)
+    except ValueError:
+        cat_enum = TryOnCategory.outfit
 
     record = {
         "look_id": look_id,
         "user_id": user_id,
         "title": title,
-        "category": cat_val,
+        "category": cat_enum.value,
         "original_image_url": orig_url,
         "result_image_url": res_url,
         "style_item_name": str(style_name).title(),
@@ -116,7 +271,7 @@ async def save_look(request: SaveLookRequest, current_user: dict = Depends(get_c
         look_id=look_id,
         user_id=record["user_id"],
         title=record["title"],
-        category=TryOnCategory(record["category"]),
+        category=cat_enum,
         original_image_url=record["original_image_url"],
         result_image_url=record["result_image_url"],
         style_item_name=record["style_item_name"],

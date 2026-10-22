@@ -12,6 +12,7 @@ class TryOnCategory(str, Enum):
     accessories = "accessories"
     makeup = "makeup"
     hairstyle = "hairstyle"
+    complete = "complete"
 
 
 class AccessorySubcategory(str, Enum):

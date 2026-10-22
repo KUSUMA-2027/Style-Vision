@@ -74,19 +74,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Static file serving for uploads (development only) ────────────────────────
-# In production, serve static files via a CDN or dedicated media server.
-if os.path.isdir(settings.upload_dir):
-    app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
-
-if os.path.isdir(settings.catalogue_dir):
-    app.mount("/catalogue", StaticFiles(directory=settings.catalogue_dir), name="catalogue")
-
-# ── Static file serving for depth tilt outputs ──────────────────────────
+# ── Static file serving for uploads & catalogue ──────────────────────────────
+os.makedirs(settings.upload_dir, exist_ok=True)
+os.makedirs(settings.catalogue_dir, exist_ok=True)
 depth_dir = os.path.join(settings.upload_dir, "depth")
-if os.path.isdir(depth_dir) or True:
-    os.makedirs(depth_dir, exist_ok=True)
-    app.mount("/uploads/depth", StaticFiles(directory=depth_dir), name="depth")
+os.makedirs(depth_dir, exist_ok=True)
+
+app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
+app.mount("/catalogue", StaticFiles(directory=settings.catalogue_dir), name="catalogue")
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────
@@ -117,10 +112,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         field = ".".join(str(loc) for loc in err.get("loc", []))
         msg = err.get("msg", "Validation error")
         errors.append({"field": field, "message": msg})
+    detail_msg = "; ".join(f"{e['field']}: {e['message']}" for e in errors)
     return JSONResponse(
         status_code=422,
         content={
             "error": "Validation Error",
+            "detail": detail_msg or "Validation error in request payload",
             "status_code": 422,
             "details": errors,
         },
@@ -130,10 +127,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Format explicit HTTP exceptions into uniform error payloads."""
+    detail_str = exc.detail if isinstance(exc.detail, str) else "Request Error"
     return JSONResponse(
         status_code=exc.status_code,
         content={
-            "error": exc.detail if isinstance(exc.detail, str) else "Request Error",
+            "error": detail_str,
+            "detail": detail_str,
             "status_code": exc.status_code,
         },
     )
@@ -147,6 +146,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "error": "Internal server error. Please try again later.",
+            "detail": "Internal server error. Please try again later.",
             "status_code": 500,
         },
     )

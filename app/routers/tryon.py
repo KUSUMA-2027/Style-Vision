@@ -40,6 +40,7 @@ from app.services.tryon_service import (
     generate_depth_variants,
 )
 from app.services.image_registry import (
+    _disk_path_from_url,
     register_stage_result,
     get_chain,
     get_session_stages,
@@ -222,15 +223,16 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
     # Auto-generate depth tilt variant for the result
     tilted_url = None
     depth_url = None
+    effective_image_id = result.get("result_image_id") or result.get("tryon_id")
+    effective_tryon_id = result.get("tryon_id")
     if result.get("status") == TryOnStatus.completed and result.get("result_image_url"):
-        rel = result["result_image_url"].lstrip("/").replace("/", os.sep)
-        result_path = os.path.join(os.getcwd(), rel)
-        if os.path.isfile(result_path):
+        result_path = _disk_path_from_url(result.get("result_image_url"))
+        if result_path and os.path.isfile(result_path):
             tilted_url, depth_url = await generate_depth_variants(
                 result_image_path=result_path,
                 user_id=user_id,
-                image_id=result.get("result_image_id") or tryon_id,
-                tryon_id=result.get("tryon_id") or tryon_id,
+                image_id=effective_image_id,
+                tryon_id=effective_tryon_id,
             )
 
     job_record = {
@@ -393,9 +395,8 @@ async def tryon_accessory(request: AccessoryTryOnRequest, current_user: dict = D
     tilted_url = None
     depth_url = None
     if result_url:
-        rel = result_url.lstrip("/").replace("/", os.sep)
-        result_path = os.path.join(os.getcwd(), rel)
-        if os.path.isfile(result_path):
+        result_path = _disk_path_from_url(result_url)
+        if result_path and os.path.isfile(result_path):
             tilted_url, depth_url = await generate_depth_variants(
                 result_image_path=result_path,
                 user_id=user_id,
@@ -590,9 +591,8 @@ async def tryon_makeup(request: MakeupTryOnRequest, current_user: dict = Depends
     tilted_url = None
     depth_url = None
     if result_url:
-        rel = result_url.lstrip("/").replace("/", os.sep)
-        result_path = os.path.join(os.getcwd(), rel)
-        if os.path.isfile(result_path):
+        result_path = _disk_path_from_url(result_url)
+        if result_path and os.path.isfile(result_path):
             tilted_url, depth_url = await generate_depth_variants(
                 result_image_path=result_path,
                 user_id=user_id,
@@ -765,9 +765,8 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
     tilted_url = None
     depth_url = None
     if result_url:
-        rel = result_url.lstrip("/").replace("/", os.sep)
-        result_path = os.path.join(os.getcwd(), rel)
-        if os.path.isfile(result_path):
+        result_path = _disk_path_from_url(result_url)
+        if result_path and os.path.isfile(result_path):
             tilted_url, depth_url = await generate_depth_variants(
                 result_image_path=result_path,
                 user_id=user_id,
@@ -848,13 +847,13 @@ async def remove_tryon_item(request: RemoveItemRequest, current_user: dict = Dep
         )
 
     # Slot semantics: outfit/hairstyle are single-slot (whole-stage removal);
-    # accessories/makeup remove by slot; makeup without a slot removes ALL makeup.
+    # accessories/makeup remove by slot; without a slot removes ALL items in that stage.
     replace_all = False
     slot = request.slot_value
     if stage in ("outfit", "hairstyle"):
         replace_all = True
         slot = None
-    elif stage == "makeup" and not slot:
+    elif stage in ("makeup", "accessories") and not slot:
         replace_all = True
     elif not slot:
         raise HTTPException(

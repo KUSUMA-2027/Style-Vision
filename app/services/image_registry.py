@@ -9,7 +9,7 @@ image of a previous stage instead of repeatedly from the original photo.
 Every image document records:
 - image_id          : unique id (upload id or try-on result id)
 - user_id           : owner (strict user isolation)
-- kind              : "original" | "stage_result"
+- kind              : "original" | "stage_result" | "depth_tilt"
 - stage             : "outfit" | "accessories" | "makeup" | "hairstyle" (results only)
 - parent_image_id   : the image this one was generated FROM (chain linkage)
 - root_image_id     : the original portrait at the head of the chain
@@ -34,8 +34,11 @@ def _disk_path_from_url(url: Optional[str]) -> Optional[str]:
     if not url:
         return None
     rel = url.lstrip("/").split("?")[0].replace("/", os.sep)
-    path = os.path.join(os.getcwd(), rel)
-    return path if os.path.isfile(path) else None
+    for base in [settings.backend_dir, os.getcwd()]:
+        candidate = os.path.join(base, rel)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def _image_id_from_url(url: Optional[str]) -> Optional[str]:
@@ -104,7 +107,7 @@ async def register_stage_result(
     doc = {
         "image_id": image_id,
         "user_id": user_id,
-        "kind": "stage_result",
+        "kind": "stage_result" if stage != "depth_tilt" else "depth_tilt",
         "stage": stage,
         "parent_image_id": parent_image_id,
         "root_image_id": root_image_id,
@@ -125,9 +128,14 @@ async def db_get_image(user_id: str, image_id: str) -> Optional[dict]:
         return None
     db = get_database()
     ref = str(image_id).strip()
-    return await db["images"].find_one(
-        {"user_id": user_id, "$or": [{"image_id": ref}, {"tryon_id": ref}]}
-    )
+    doc = await db["images"].find_one({"user_id": user_id, "image_id": ref})
+    if not doc:
+        doc = await db["images"].find_one({
+            "user_id": user_id,
+            "tryon_id": ref,
+            "stage": {"$ne": "depth_tilt"},
+        })
+    return doc
 
 
 def _load_pil_from_doc(doc: dict) -> Optional[Tuple[Image.Image, str]]:
@@ -216,11 +224,29 @@ async def get_chain(user_id: str, image_id: str) -> List[dict]:
     current_id = image_id
     db = get_database()
 
-    while current_id and current_id not in seen and len(seen) < 25:
-        seen.add(current_id)
+    while current_id and current_id not in seen and len(seen) < 30:
         doc = await db["images"].find_one({"user_id": user_id, "image_id": current_id})
         if not doc:
+            doc = await db["images"].find_one({
+                "user_id": user_id,
+                "tryon_id": current_id,
+                "stage": {"$ne": "depth_tilt"},
+            })
+        if not doc:
             break
+
+        doc_id = doc.get("image_id")
+        seen.add(doc_id)
+        seen.add(current_id)
+
+        # Depth tilt is an auxiliary visualization, not a styling layer
+        if doc.get("stage") == "depth_tilt":
+            parent = doc.get("parent_image_id")
+            if parent == current_id:
+                break
+            current_id = parent
+            continue
+
         chain.append(
             {
                 "image_id": doc.get("image_id"),
@@ -231,7 +257,10 @@ async def get_chain(user_id: str, image_id: str) -> List[dict]:
                 "created_at": doc.get("created_at"),
             }
         )
-        current_id = doc.get("parent_image_id")
+        parent = doc.get("parent_image_id")
+        if parent and parent.endswith("_tilt"):
+            parent = parent[:-5]
+        current_id = parent
 
     chain.reverse()
     return chain
@@ -248,15 +277,34 @@ async def get_chain_docs(user_id: str, image_ref: Optional[str]) -> List[dict]:
     current_id = image_ref
     db = get_database()
 
-    while current_id and current_id not in seen and len(seen) < 25:
-        seen.add(current_id)
-        doc = await db["images"].find_one(
-            {"user_id": user_id, "$or": [{"image_id": current_id}, {"tryon_id": current_id}]}
-        )
+    while current_id and current_id not in seen and len(seen) < 30:
+        doc = await db["images"].find_one({"user_id": user_id, "image_id": current_id})
+        if not doc:
+            doc = await db["images"].find_one({
+                "user_id": user_id,
+                "tryon_id": current_id,
+                "stage": {"$ne": "depth_tilt"},
+            })
         if not doc:
             break
+
+        doc_id = doc.get("image_id")
+        seen.add(doc_id)
+        seen.add(current_id)
+
+        # Skip auxiliary depth tilt documents from the styling chain
+        if doc.get("stage") == "depth_tilt":
+            parent = doc.get("parent_image_id")
+            if parent == current_id:
+                break
+            current_id = parent
+            continue
+
         docs.append(doc)
-        current_id = doc.get("parent_image_id")
+        parent = doc.get("parent_image_id")
+        if parent and parent.endswith("_tilt"):
+            parent = parent[:-5]
+        current_id = parent
 
     docs.reverse()
     return docs
@@ -332,8 +380,6 @@ async def resolve_stage_replay(
 
     source_doc = chain[first_drop_idx - 1] if first_drop_idx > 0 else None
     if source_doc is None:
-        # The dropped doc starts the chain (no original registered) — treat
-        # the original slot of that doc as the source anyway (should not happen)
         return None, [], True
 
     replay_docs = [
@@ -360,6 +406,7 @@ async def get_session_stages(user_id: str, base_image_id: str) -> dict:
                 "kind": "stage_result",
                 "stage": stage,
                 "root_image_id": base_image_id,
+                "metadata.removed": {"$ne": True},
             },
             sort=[("created_at", -1)],
         )
@@ -405,6 +452,8 @@ async def get_live_items(user_id: str, image_ref: Optional[str]) -> List[dict]:
         if meta.get("removed"):
             continue
         stage = doc.get("stage")
+        if stage == "depth_tilt":
+            continue
         items.append(
             {
                 "image_id": doc.get("image_id"),

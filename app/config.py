@@ -2,9 +2,12 @@
 StyleVision Backend — Application Settings
 Loaded from environment variables / .env file via pydantic-settings.
 """
+import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
+
+_BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 class Settings(BaseSettings):
@@ -14,6 +17,9 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    # Base directory for the backend package
+    backend_dir: str = _BACKEND_DIR
 
     # Application
     app_env: str = "development"
@@ -30,9 +36,9 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 7
 
-    # File storage
-    upload_dir: str = "uploads"
-    catalogue_dir: str = "catalogue"
+    # File storage (defaults anchored to backend root so working dir doesn't break asset loading)
+    upload_dir: str = os.path.normpath(os.path.join(_BACKEND_DIR, "uploads"))
+    catalogue_dir: str = os.path.normpath(os.path.join(_BACKEND_DIR, "catalogue"))
     max_upload_size: int = 10 * 1024 * 1024  # 10 MB
     allowed_extensions: str = "jpg,jpeg,png,webp"
 

@@ -231,9 +231,12 @@ def synthesize_hairstyle_tryon(
     # 4. Scale hairstyle to head dimensions
     ah, aw = hair_rgba.shape[:2]
     base_scale = (face_w * prof["margin"]) / prof["cw"]
-    # Also constrain by face height so hair doesn't overflow
-    h_scale = (face_h * 1.6) / ah
+    # Constrain by face height so hair covers head properly
+    h_scale = (face_h * 1.15) / ah
     final_scale = min(base_scale, h_scale)
+    # Ensure minimum visible size relative to image width
+    min_scale = (w * 0.25) / aw
+    final_scale = max(final_scale, min_scale)
     if scale_override is not None:
         final_scale = final_scale * scale_override
     target_w = max(60, int(aw * final_scale))
@@ -264,6 +267,8 @@ def synthesize_hairstyle_tryon(
 
     paste_x = int(face_center_x - (prof["cx"] * final_scale))
     paste_y = int(forehead_pt[1] - (prof["top_y"] * final_scale) + prof["y_adj"])
+    # Shift hair slightly upward to sit better on crown
+    paste_y -= int(final_scale * 10)
 
     # Apply manual offsets
     if offset_x is not None:

@@ -39,6 +39,7 @@ class UserLoginRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
+    profile_photo: Optional[str] = Field(None, max_length=500)
 
 
 # ── Response Payloads ─────────────────────────────────────────────────────────
