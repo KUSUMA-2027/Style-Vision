@@ -283,6 +283,7 @@ async def rebuild_and_register_chain(
                 url=result_url,
                 metadata={
                     **op["params"],
+                    "mode": op.get("params", {}).get("mode") or ("catvton" if stage == "outfit" else "local"),
                     "replayed_from": op.get("doc_id"),
                     "parent_url": last_url,
                 },

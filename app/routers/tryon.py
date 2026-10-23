@@ -192,10 +192,13 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
                 detail="Outfit rebuild failed — could not reconstruct your look.",
             )
         now = datetime.now(timezone.utc)
+        from app.config import get_settings as _get_settings
+        _st = _get_settings()
+        _mode = TryOnMode.catvton if _st.tryon_mode == "catvton" else TryOnMode.prototype
         result = {
             "tryon_id": tryon_id,
             "status": TryOnStatus.completed,
-            "mode": TryOnMode.prototype,
+            "mode": _mode,
             "source": request.source,
             "parent_image_id": source_doc_id or request.person_image_id,
             "result_image_id": final_id or tryon_id,

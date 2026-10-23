@@ -19,11 +19,13 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODELS_BIN_DIR = os.path.join(BASE_DIR, "models_bin")
 TASK_MODEL_PATH = os.path.join(MODELS_BIN_DIR, "face_landmarker.task")
 POSE_TASK_MODEL_PATH = os.path.join(MODELS_BIN_DIR, "pose_landmarker.task")
+HAND_TASK_MODEL_PATH = os.path.join(MODELS_BIN_DIR, "hand_landmarker.task")
 HAAR_CASCADE_PATH = os.path.join(MODELS_BIN_DIR, "haarcascade_frontalface_default.xml")
 
 # Cached detector instances
 _cached_face_landmarker = None
 _cached_pose_landmarker = None
+_cached_hand_landmarker = None
 _cached_haar_cascade = None
 
 
@@ -495,5 +497,177 @@ def detect_pose_landmarks(np_rgb: np.ndarray) -> Optional[Dict[str, Any]]:
             "left_ankle": np.array([cx + hip_span * 0.45, float(h)]),
             "right_ankle": np.array([cx - hip_span * 0.45, float(h)]),
         }
+
+    return None
+
+
+
+def get_mediapipe_hand_landmarker():
+    """Retrieve or initialize the MediaPipe Tasks HandLandmarker singleton for 21-joint 3D hand tracking."""
+    global _cached_hand_landmarker
+    if _cached_hand_landmarker is not None:
+        return _cached_hand_landmarker
+
+    if not os.path.exists(HAND_TASK_MODEL_PATH):
+        logger.warning("MediaPipe hand_landmarker.task not found at %s", HAND_TASK_MODEL_PATH)
+        return None
+
+    try:
+        import mediapipe as mp
+        from mediapipe.tasks import python
+        from mediapipe.tasks.python import vision
+
+        base_options = python.BaseOptions(model_asset_path=HAND_TASK_MODEL_PATH)
+        options = vision.HandLandmarkerOptions(
+            base_options=base_options,
+            num_hands=2,
+            min_hand_detection_confidence=0.20,
+            min_hand_presence_confidence=0.20,
+            min_tracking_confidence=0.20,
+        )
+        _cached_hand_landmarker = vision.HandLandmarker.create_from_options(options)
+        logger.info("MediaPipe HandLandmarker task loaded successfully from %s", HAND_TASK_MODEL_PATH)
+        return _cached_hand_landmarker
+    except Exception as e:
+        logger.warning("Failed to initialize MediaPipe HandLandmarker: %s", e)
+        return None
+
+
+def detect_hand_landmarks(
+    np_rgb: np.ndarray,
+    pose_hint: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Detect 21 3D hand landmarks for high-precision virtual ring placement and finger geometry.
+    Two-stage detection:
+    1. Direct full-image HandLandmarker (best for hand photos, upper-body shots, selfies).
+    2. Multi-crop around wrist coordinates if pose_hint is provided (handles full-body portraits).
+    3. Anatomical fallback anchored to wrists or waist if hand is obscured.
+    """
+    detector = get_mediapipe_hand_landmarker()
+    if detector is None or np_rgb is None:
+        return None
+
+    h, w = np_rgb.shape[:2]
+    import mediapipe as mp
+
+    def _parse_hand(lms, handedness_str="Right", offset_x=0.0, offset_y=0.0, scale_x=1.0, scale_y=1.0):
+        raw = {}
+        xs, ys = [], []
+        for idx, lm in enumerate(lms):
+            px = float(lm.x * scale_x + offset_x)
+            py = float(lm.y * scale_y + offset_y)
+            pz = float(lm.z * scale_x)
+            raw[idx] = np.array([px, py, pz])
+            xs.append(px)
+            ys.append(py)
+
+        # Key finger coordinates (Ring finger is MCP 13 -> PIP 14 -> DIP 15 -> TIP 16)
+        p_ring_mcp = raw[13][:2]  # base knuckle
+        p_ring_pip = raw[14][:2]  # proximal interphalangeal joint
+        p_ring_dip = raw[15][:2]
+        p_ring_tip = raw[16][:2]
+
+        p_middle_mcp = raw[9][:2]   # adjacent medial finger
+        p_middle_pip = raw[10][:2]
+        p_pinky_mcp = raw[17][:2]    # adjacent lateral finger
+        p_pinky_pip = raw[18][:2]
+
+        # Vector along proximal phalanx (from knuckle to mid joint)
+        finger_vec = p_ring_pip - p_ring_mcp
+        phalanx_len = float(np.linalg.norm(finger_vec))
+        if phalanx_len < 2.0:
+            finger_vec = np.array([0.0, -10.0])
+            phalanx_len = 10.0
+
+        finger_dir = finger_vec / phalanx_len
+        angle_rad = math.atan2(finger_dir[1], finger_dir[0])
+        angle_deg = math.degrees(angle_rad)
+
+        # Caliber (thickness) between adjacent fingers (middle and pinky)
+        d_middle = float(np.linalg.norm(p_ring_mcp - p_middle_mcp))
+        d_pinky = float(np.linalg.norm(p_ring_mcp - p_pinky_mcp))
+        valid_ds = [d for d in [d_middle, d_pinky] if d > 5.0]
+        interdigital_width = float(min(valid_ds) * 0.95) if valid_ds else max(16.0, phalanx_len * 0.45)
+
+        # Center point sits on the proximal phalanx, ~38% along the joint from knuckle
+        ring_center = p_ring_mcp + finger_vec * 0.38
+
+        # Hand bounding box for zooming / closeup
+        pad = int(max(xs) - min(xs)) * 0.2
+        hand_bbox = (
+            max(0, int(min(xs) - pad)),
+            max(0, int(min(ys) - pad)),
+            min(w, int(max(xs) + pad)),
+            min(h, int(max(ys) + pad)),
+        )
+
+        return {
+            "has_hand": True,
+            "raw": raw,
+            "handedness": handedness_str,
+            "ring_mcp": p_ring_mcp,
+            "ring_pip": p_ring_pip,
+            "ring_dip": p_ring_dip,
+            "ring_tip": p_ring_tip,
+            "middle_mcp": p_middle_mcp,
+            "pinky_mcp": p_pinky_mcp,
+            "wrist": raw[0][:2],
+            "ring_center": ring_center,
+            "finger_dir": finger_dir,
+            "angle_deg": angle_deg,
+            "phalanx_length": phalanx_len,
+            "interdigital_width": interdigital_width,
+            "hand_bbox": hand_bbox,
+        }
+
+    # Stage 1: Direct full image inference
+    try:
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(np_rgb))
+        res = detector.detect(mp_img)
+        if res and res.hand_landmarks and len(res.hand_landmarks) > 0:
+            lms = res.hand_landmarks[0]
+            hand_label = "Right"
+            if res.handedness and len(res.handedness) > 0 and len(res.handedness[0]) > 0:
+                hand_label = res.handedness[0][0].category_name
+            logger.info("[HandUtils] Direct HandLandmarker success: %s hand with 21 landmarks", hand_label)
+            return _parse_hand(lms, hand_label, offset_x=0.0, offset_y=0.0, scale_x=float(w), scale_y=float(h))
+    except Exception as e:
+        logger.warning("[HandUtils] Direct hand detection error: %s", e)
+
+    # Stage 2: Crop around wrists if pose_hint is available (for full-body portraits)
+    if pose_hint:
+        for wrist_key in ["left_wrist", "right_wrist"]:
+            if wrist_key in pose_hint:
+                w_pt = pose_hint[wrist_key]
+                wx, wy = int(w_pt[0]), int(w_pt[1])
+                crop_size = int(max(w, h) * 0.22)
+                x1 = max(0, wx - crop_size // 2)
+                y1 = max(0, wy - crop_size // 2)
+                x2 = min(w, x1 + crop_size)
+                y2 = min(h, y1 + crop_size)
+                x1 = max(0, x2 - crop_size)
+                y1 = max(0, y2 - crop_size)
+
+                crop = np_rgb[y1:y2, x1:x2]
+                ch, cw = crop.shape[:2]
+                if ch > 40 and cw > 40:
+                    try:
+                        mp_crop = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(crop))
+                        c_res = detector.detect(mp_crop)
+                        if c_res and c_res.hand_landmarks and len(c_res.hand_landmarks) > 0:
+                            lms = c_res.hand_landmarks[0]
+                            hand_label = "Left" if "left" in wrist_key else "Right"
+                            logger.info("[HandUtils] Wrist crop HandLandmarker success for %s: %s hand", wrist_key, hand_label)
+                            return _parse_hand(
+                                lms,
+                                hand_label,
+                                offset_x=float(x1),
+                                offset_y=float(y1),
+                                scale_x=float(cw),
+                                scale_y=float(ch),
+                            )
+                    except Exception as e:
+                        logger.debug("[HandUtils] Crop detection error for %s: %s", wrist_key, e)
 
     return None

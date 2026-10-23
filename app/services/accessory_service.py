@@ -42,19 +42,6 @@ ACCESSORY_ASSET_MAP = {
     # Nose Pin
     "item-acc-4": "diamond_nose_pin.png",
     "nose_pin": "diamond_nose_pin.png",
-    # Bracelet
-    "item-acc-5": "tennis_bracelet.png",
-    "bracelet": "tennis_bracelet.png",
-    "bracelets": "tennis_bracelet.png",
-    "tennis_bracelet": "tennis_bracelet.png",
-    "bangle": "tennis_bracelet.png",
-    "wrist": "tennis_bracelet.png",
-    # Ring
-    "item-acc-6": "solitaire_diamond_ring.png",
-    "rings": "solitaire_diamond_ring.png",
-    "ring": "solitaire_diamond_ring.png",
-    "diamond_ring": "solitaire_diamond_ring.png",
-    "solitaire_ring": "solitaire_diamond_ring.png",
     # Bags
     "item-acc-7": "structured_tote_bag.png",
     "bags": "structured_tote_bag.png",
@@ -154,44 +141,6 @@ def _detect_landmarks_two_stage(np_rgb: np.ndarray) -> Optional[Dict[int, np.nda
     """
     return detect_face_landmarks(np_rgb)
 
-def _call_cloud_accessory_sync(
-    endpoint: str,
-    person_img: Image.Image,
-    acc_img: Image.Image,
-    subcategory: str,
-    timeout_secs: float = 35.0,
-) -> Optional[Image.Image]:
-    import httpx
-    clean_endpoint = endpoint.strip().rstrip("/")
-    sub = subcategory.lower()
-    if any(k in sub for k in ["bag", "tote", "handbag", "purse", "hat", "shoes"]):
-        url = f"{clean_endpoint}/tryon-accessory"
-    else:
-        url = f"{clean_endpoint}/tryon-jewelry"
-
-    p_buf = io.BytesIO()
-    person_img.convert("RGB").save(p_buf, format="JPEG", quality=95)
-    g_buf = io.BytesIO()
-    acc_img.convert("RGB").save(g_buf, format="JPEG", quality=95)
-
-    files = {
-        "person_image": ("person.jpg", p_buf.getvalue(), "image/jpeg"),
-        "accessory_image": ("accessory.jpg", g_buf.getvalue(), "image/jpeg"),
-    }
-    data = {"subcategory": subcategory}
-    try:
-        with httpx.Client(timeout=timeout_secs) as client:
-            resp = client.post(url, files=files, data=data)
-            if resp.status_code == 200:
-                logger.info("Cloud accessory/jewelry tryon successful via %s", url)
-                return Image.open(io.BytesIO(resp.content)).convert("RGBA")
-    except Exception as exc:
-        logger.warning("Cloud accessory endpoint %s unreachable or skipped (%s)", url, exc)
-    return None
-
-
-
-
 def synthesize_accessory_tryon(
     person_img: Image.Image,
     style_item_id: str,
@@ -226,28 +175,14 @@ def synthesize_accessory_tryon(
     pose = detect_pose_landmarks(np_img)
     landmark_desc = "Facial Landmark Anchor"
 
-    cloud_neural_used = False
-    if settings.catvton_endpoint:
-        try:
-            cloud_res = _call_cloud_accessory_sync(
-                endpoint=settings.catvton_endpoint,
-                person_img=person_img,
-                acc_img=acc_img,
-                subcategory=subcat,
-            )
-            if cloud_res:
-                canvas = cloud_res.resize((pw, ph), Image.Resampling.LANCZOS).convert("RGBA")
-                landmark_desc = f"Neural Diffusion ({'AnyDoor' if any(k in subcat for k in ['bag', 'tote', 'hat', 'shoes']) else 'IP-Adapter'} on GPU)"
-                cloud_neural_used = True
-        except Exception as exc:
-            logger.warning("Cloud neural accessory attempt failed (%s), using landmark fitting fallback", exc)
+
 
     def pt(idx: int) -> np.ndarray:
         if landmarks and idx in landmarks:
             return landmarks[idx]
         return np.array([pw * 0.5, ph * 0.5], dtype=np.float32)
 
-    if not cloud_neural_used and landmarks:
+    if landmarks:
 
         # ── 1. GLASSES & SUNGLASSES ──────────────────────────────────────────
         if "glass" in subcat or subcat == "glasses":
@@ -373,86 +308,7 @@ def synthesize_accessory_tryon(
             canvas.alpha_composite(resized_pin, (paste_x, paste_y))
             landmark_desc = "Left Nostril Ala (Mesh #278)"
 
-        # ── 5. BRACELET ──────────────────────────────────────────────────────
-        elif any(k in subcat for k in ["bracelet", "bangle", "wrist", "watch"]):
-            p_chin = pt(152)
-            p_forehead = pt(10)
-            p_left_ear = pt(234)
-            p_right_ear = pt(454)
-            face_h = math.hypot(p_chin[0] - p_forehead[0], p_chin[1] - p_forehead[1])
-            face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
-            scale_factor = override_scale if override_scale else 1.0
-
-            if pose and pose.get("has_pose"):
-                wrist = pose["left_wrist"]
-                elbow = pose["left_elbow"]
-                # Compute angle along the forearm
-                fdx = wrist[0] - elbow[0]
-                fdy = wrist[1] - elbow[1]
-                angle_deg = -math.degrees(math.atan2(fdy, fdx)) + 90.0
-                
-                target_w = int(face_w * 0.36 * scale_factor)
-                target_h = int(target_w * (acc_img.height / acc_img.width))
-                resized_br = acc_img.resize((max(15, target_w), max(10, target_h)), Image.Resampling.LANCZOS)
-                rotated_br = resized_br.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
-
-                paste_x = int(wrist[0] - (rotated_br.width / 2))
-                paste_y = int(wrist[1] - (rotated_br.height / 2))
-                canvas.alpha_composite(rotated_br, (max(0, paste_x), max(0, paste_y)))
-                landmark_desc = f"Wrist Anatomy (Pose Landmark #15, angle {angle_deg:.1f} deg)"
-            else:
-                # Elegant luxury jewelry inset for close-up portraits
-                badge_w = min(220, int(pw * 0.32))
-                badge_h = int(badge_w * 0.85)
-                badge = Image.new("RGBA", (badge_w, badge_h), (18, 14, 28, 220))
-                b_draw = ImageDraw.Draw(badge)
-                b_draw.rectangle([0, 0, badge_w - 1, badge_h - 1], outline=(218, 165, 32, 230), width=2)
-                br_preview = acc_img.resize((int(badge_w * 0.82), int(badge_w * 0.82 * (acc_img.height / acc_img.width))), Image.Resampling.LANCZOS)
-                badge.alpha_composite(br_preview, ((badge_w - br_preview.width) // 2, (badge_h - br_preview.height) // 2 - 8))
-                canvas.alpha_composite(badge, (pw - badge_w - 24, ph - badge_h - 44))
-                landmark_desc = "Luxury Wrist Jewelry Preview"
-
-        # ── 6. RING (SOLITAIRE DIAMOND RING) ─────────────────────────────────
-        elif any(k in subcat for k in ["ring", "rings"]):
-            p_chin = pt(152)
-            p_forehead = pt(10)
-            p_left_ear = pt(234)
-            p_right_ear = pt(454)
-            face_h = math.hypot(p_chin[0] - p_forehead[0], p_chin[1] - p_forehead[1])
-            face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
-            scale_factor = override_scale if override_scale else 1.0
-
-            if pose and pose.get("has_pose"):
-                finger = pose["left_index"]
-                target_w = max(16, int(face_w * 0.25 * scale_factor))
-                target_h = int(target_w * (acc_img.height / acc_img.width))
-                resized_ring = acc_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-
-                paste_x = int(finger[0] - (resized_ring.width / 2))
-                paste_y = int(finger[1] - (resized_ring.height / 2))
-                canvas.alpha_composite(resized_ring, (max(0, paste_x), max(0, paste_y)))
-
-                # Add luxury macro preview badge in bottom-right so the user can see diamond facets
-                badge_size = min(220, int(pw * 0.28))
-                badge = Image.new("RGBA", (badge_size, badge_size), (18, 14, 28, 225))
-                b_draw = ImageDraw.Draw(badge)
-                b_draw.rectangle([0, 0, badge_size - 1, badge_size - 1], outline=(218, 165, 32, 230), width=2)
-                macro_ring = acc_img.resize((int(badge_size * 0.80), int(badge_size * 0.80 * (acc_img.height / acc_img.width))), Image.Resampling.LANCZOS)
-                badge.alpha_composite(macro_ring, ((badge_size - macro_ring.width) // 2, (badge_size - macro_ring.height) // 2 - 8))
-                canvas.alpha_composite(badge, (pw - badge_size - 24, ph - badge_size - 44))
-                landmark_desc = "Hand & Index Finger (Pose Landmark #19 + Solitaire Macro)"
-            else:
-                # Portrait macro showcase
-                badge_size = min(240, int(pw * 0.35))
-                badge = Image.new("RGBA", (badge_size, badge_size), (18, 14, 28, 225))
-                b_draw = ImageDraw.Draw(badge)
-                b_draw.rectangle([0, 0, badge_size - 1, badge_size - 1], outline=(218, 165, 32, 230), width=2)
-                macro_ring = acc_img.resize((int(badge_size * 0.80), int(badge_size * 0.80 * (acc_img.height / acc_img.width))), Image.Resampling.LANCZOS)
-                badge.alpha_composite(macro_ring, ((badge_size - macro_ring.width) // 2, (badge_size - macro_ring.height) // 2 - 8))
-                canvas.alpha_composite(badge, (pw - badge_size - 24, ph - badge_size - 44))
-                landmark_desc = "Solitaire Diamond Macro Showcase"
-
-        # ── 7. BAGS (TOTE BAG) ───────────────────────────────────────────────
+        # ── 7. BAGS (TOTE BAG — HAND-HELD GRIP & HANG) ──────────────────────
         elif any(k in subcat for k in ["bag", "tote", "handbag", "purse"]):
             p_chin = pt(152)
             p_forehead = pt(10)
@@ -462,29 +318,84 @@ def synthesize_accessory_tryon(
             face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
             scale_factor = override_scale if override_scale else 1.0
 
-            if pose and pose.get("has_pose"):
-                # Anatomically proportioned to body shoulder span (approx 70% shoulder span)
-                sh_span = pose.get("shoulder_span", int(face_w * 2.8))
-                target_w = int(sh_span * 0.70 * scale_factor)
-                target_h = int(target_w * (acc_img.height / acc_img.width))
-                resized_bag = acc_img.resize((max(20, target_w), max(20, target_h)), Image.Resampling.LANCZOS)
+            # Clean any studio floor artifacts from bag asset
+            bag_arr = np.array(acc_img)
+            bh = bag_arr.shape[0]
+            is_floor = (
+                (bag_arr[:, :, 0] > 195)
+                & (bag_arr[:, :, 1] > 195)
+                & (bag_arr[:, :, 2] > 190)
+                & (np.arange(bh)[:, None] > int(bh * 0.88))
+            )
+            bag_arr[is_floor, 3] = 0
+            clean_acc_img = Image.fromarray(bag_arr, "RGBA")
 
-                # Hang naturally from the wrist/hand alongside thigh
-                wrist = pose["right_wrist"]
-                paste_x = int(wrist[0] - (target_w * 0.45))
-                paste_y = int(wrist[1] - (target_h * 0.15))
-                paste_x = max(0, min(pw - target_w, paste_x))
-                paste_y = max(0, min(ph - target_h, paste_y))
-                canvas.alpha_composite(resized_bag, (paste_x, paste_y))
-                landmark_desc = "Hand / Wrist Hang (Pose Landmark #16)"
-            else:
-                target_w = int(face_w * 2.2 * scale_factor)
-                target_h = int(target_w * (acc_img.height / acc_img.width))
-                resized_bag = acc_img.resize((max(20, target_w), max(20, target_h)), Image.Resampling.LANCZOS)
+            # Proportion to shoulder span (72% of shoulder span for natural tote fit)
+            sh_span = pose.get("shoulder_span", int(face_w * 2.8)) if pose else int(face_w * 2.8)
+            target_w = int(sh_span * 0.72 * scale_factor)
+            target_h = int(target_w * (clean_acc_img.height / clean_acc_img.width))
+            resized_bag = clean_acc_img.resize((max(30, target_w), max(30, target_h)), Image.Resampling.LANCZOS)
+
+            # Choose hand: prefer right_wrist/right_index if on-screen, else left_wrist/left_index
+            placed_in_hand = False
+            hand_ref_x, hand_ref_y = float(pw * 0.35), float(ph * 0.60)
+            if pose and pose.get("has_pose"):
+                rw = pose.get("right_wrist")
+                ri = pose.get("right_index", rw)
+                lw = pose.get("left_wrist")
+                li = pose.get("left_index", lw)
+
+                if rw is not None and 0 <= rw[0] <= pw and 0 <= rw[1] <= ph * 0.92:
+                    grip_x = float(rw[0] * 0.5 + ri[0] * 0.5) if ri is not None else float(rw[0])
+                    grip_y = float(rw[1] * 0.4 + ri[1] * 0.6) if ri is not None else float(rw[1])
+                    paste_x = int(grip_x - target_w * 0.45)
+                    paste_y = int(grip_y - target_h * 0.05)
+                    hand_ref_x, hand_ref_y = grip_x, grip_y
+                    placed_in_hand = True
+                    landmark_desc = "Right Hand Holding Handle"
+                elif lw is not None and 0 <= lw[0] <= pw and 0 <= lw[1] <= ph * 0.92:
+                    grip_x = float(lw[0] * 0.5 + li[0] * 0.5) if li is not None else float(lw[0])
+                    grip_y = float(lw[1] * 0.4 + li[1] * 0.6) if li is not None else float(lw[1])
+                    paste_x = int(grip_x - target_w * 0.55)
+                    paste_y = int(grip_y - target_h * 0.05)
+                    hand_ref_x, hand_ref_y = grip_x, grip_y
+                    placed_in_hand = True
+                    landmark_desc = "Left Hand Holding Handle"
+
+            if not placed_in_hand:
+                # Hip / Torso side placement for upper-body/bust portraits
                 paste_x = min(pw - target_w - 20, int(p_right_ear[0] + face_w * 0.40))
-                paste_y = max(0, ph - target_h - 30)
-                canvas.alpha_composite(resized_bag, (max(0, paste_x), max(0, paste_y)))
+                paste_y = max(0, ph - target_h - 20)
                 landmark_desc = "Hand / Hip Bag Placement"
+
+            # Bound inside canvas
+            paste_x = max(0, min(pw - target_w, paste_x))
+            paste_y = max(0, min(ph - target_h, paste_y))
+
+            # Composite bag onto canvas
+            canvas.alpha_composite(resized_bag, (paste_x, paste_y))
+
+            # If placed in hand, blend hand and curled fingers OVER handle strap so she genuinely holds it
+            if placed_in_hand:
+                try:
+                    hx1 = max(0, int(hand_ref_x - face_w * 0.22))
+                    hx2 = min(pw, int(hand_ref_x + face_w * 0.22))
+                    hy1 = max(0, int(hand_ref_y - face_h * 0.20))
+                    hy2 = min(ph, int(hand_ref_y + face_h * 0.20))
+
+                    if (hx2 - hx1) > 10 and (hy2 - hy1) > 10:
+                        hand_crop = person_img.convert("RGBA").crop((hx1, hy1, hx2, hy2))
+                        hand_mask = Image.new("L", (hx2 - hx1, hy2 - hy1), 0)
+                        hm_arr = np.array(hand_mask)
+                        cx_h = (hx2 - hx1) // 2
+                        cy_h = int((hy2 - hy1) * 0.55)
+                        rx = int((hx2 - hx1) * 0.38)
+                        ry = int((hy2 - hy1) * 0.38)
+                        cv2.ellipse(hm_arr, (cx_h, cy_h), (rx, ry), 0, 0, 360, 255, -1)
+                        hm_blurred = cv2.GaussianBlur(hm_arr, (11, 11), 4)
+                        canvas.paste(hand_crop, (hx1, hy1), mask=Image.fromarray(hm_blurred, "L"))
+                except Exception as e:
+                    logger.warning("Hand layering over handle strap skipped: %s", e)
 
         else:
             # Torso / Generic fallback
@@ -494,7 +405,7 @@ def synthesize_accessory_tryon(
             canvas.alpha_composite(resized_bag, (int(pw * 0.65), int(ph * 0.55)))
             landmark_desc = "Torso / Hip Anchor"
 
-    elif not cloud_neural_used:
+    else:
         logger.warning("No face detected by two-stage MediaPipe. Using anatomical estimate.")
         target_w = int(pw * 0.45)
         target_h = int(target_w * (acc_img.height / acc_img.width))
@@ -512,10 +423,12 @@ def synthesize_accessory_tryon(
     final_rgb.save(output_path, format="PNG")
     result_url = f"/uploads/tryon/{output_filename}"
 
-    # Generate Close-up Portrait Crop (Head & Neck Zoom)
+    # Generate Close-up Crop: Head & Neck zoom for facial jewelry only
+    # Do NOT generate face close-up for bags so the user sees the complete look with bag in hand!
     closeup_result_url = None
     closeup_orig_url = None
-    if landmarks:
+    is_bag = any(k in subcat for k in ["bag", "tote", "handbag", "purse"])
+    if landmarks and not is_bag:
         try:
             p_forehead = pt(10)
             p_chin = pt(152)

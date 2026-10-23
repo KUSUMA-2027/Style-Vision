@@ -411,12 +411,15 @@ async def get_session_stages(user_id: str, base_image_id: str) -> dict:
             sort=[("created_at", -1)],
         )
         if doc:
+            meta = doc.get("metadata") or {}
+            mode_val = meta.get("mode") or ("catvton" if stage == "outfit" else "local")
             stages[stage] = {
                 "image_id": doc.get("image_id"),
                 "tryon_id": doc.get("tryon_id"),
                 "url": doc.get("url"),
                 "created_at": doc.get("created_at"),
-                "metadata": doc.get("metadata", {}),
+                "mode": mode_val,
+                "metadata": meta,
             }
             if current_doc is None or (doc.get("created_at") or datetime.min.replace(tzinfo=timezone.utc)) > (current_doc.get("created_at") or datetime.min.replace(tzinfo=timezone.utc)):
                 current_doc = doc
@@ -454,6 +457,7 @@ async def get_live_items(user_id: str, image_ref: Optional[str]) -> List[dict]:
         stage = doc.get("stage")
         if stage == "depth_tilt":
             continue
+        mode_val = meta.get("mode") or ("catvton" if stage == "outfit" else "local")
         items.append(
             {
                 "image_id": doc.get("image_id"),
@@ -462,6 +466,7 @@ async def get_live_items(user_id: str, image_ref: Optional[str]) -> List[dict]:
                 "slot": _slot_of_doc(stage, doc) if stage else None,
                 "title": _item_title_from_doc(doc),
                 "url": doc.get("url"),
+                "mode": mode_val,
                 "created_at": doc.get("created_at"),
             }
         )

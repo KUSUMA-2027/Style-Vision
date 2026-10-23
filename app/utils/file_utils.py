@@ -41,7 +41,7 @@ ALLOWED_MIME_TYPES = {
 ALLOWED_IMG_HEADERS = {"jpeg", "png", "webp"}
 
 # Upload limits
-MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024   # 10 MB
+MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024   # 25 MB
 MIN_FILE_SIZE_BYTES = 1024                # 1 KB — reject empty/corrupt files
 
 
@@ -82,7 +82,7 @@ async def validate_and_read_upload(upload: UploadFile) -> Tuple[bytes, str]:
         size_mb = file_size / (1024 * 1024)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large ({size_mb:.1f} MB). Maximum allowed size is 10 MB.",
+            detail=f"File too large ({size_mb:.1f} MB). Maximum allowed size is 25 MB.",
         )
 
     # --- Magic-byte validation ---

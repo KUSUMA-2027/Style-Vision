@@ -36,6 +36,8 @@ class OutfitTryOnResponse(BaseModel):
     tryon_id: str
     status: TryOnStatus
     mode: TryOnMode
+    engine_used: str = "gpu"
+    engine_label: str = "Cloud GPU (CatVTON AI)"
     source: str = "catalogue"
     parent_image_id: Optional[str] = None
     result_image_id: Optional[str] = None
@@ -65,6 +67,9 @@ class AccessoryTryOnResponse(BaseModel):
     tryon_id: str
     status: TryOnStatus
     subcategory: str
+    mode: str = "local"
+    engine_used: str = "local"
+    engine_label: str = "Local Engine (MediaPipe)"
     landmark_used: Optional[str] = None    # e.g. "Eye Bridge #168"
     parent_image_id: Optional[str] = None
     result_image_id: Optional[str] = None
@@ -93,6 +98,9 @@ class MakeupTryOnRequest(BaseModel):
 class MakeupTryOnResponse(BaseModel):
     tryon_id: str
     status: TryOnStatus
+    mode: str = "local"
+    engine_used: str = "local"
+    engine_label: str = "Local Engine (MediaPipe)"
     makeup_type: str = "full_transfer"
     style_name: Optional[str] = "Complete Reference Makeup Transfer"
     reference_image_url: Optional[str] = None
@@ -125,6 +133,9 @@ class HairstyleTryOnRequest(BaseModel):
 class HairstyleTryOnResponse(BaseModel):
     tryon_id: str
     status: TryOnStatus
+    mode: str = "local"
+    engine_used: str = "local"
+    engine_label: str = "Local Engine (MediaPipe)"
     style_name: str
     color_hex: Optional[str] = None
     parent_image_id: Optional[str] = None

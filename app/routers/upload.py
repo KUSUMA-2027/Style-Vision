@@ -45,11 +45,26 @@ async def upload_photo(file: UploadFile = File(...), current_user: dict = Depend
     user_id = current_user["sub"]
     raw_bytes, extension = await validate_and_read_upload(file)
 
-    # Read and inspect image using Pillow
+    # Read, orient, and inspect image using Pillow
     try:
+        from PIL import ImageOps
         with Image.open(io.BytesIO(raw_bytes)) as img:
+            # Auto-orient based on EXIF camera tag
+            img = ImageOps.exif_transpose(img) or img
             width, height = img.size
             format_name = img.format or extension.upper()
+
+            # Downscale if excessively large (> 1600px on longest edge)
+            # This makes all try-on pipelines and mobile display significantly faster
+            if max(width, height) > 1600:
+                scale = 1600.0 / max(width, height)
+                new_w, new_h = max(256, int(width * scale)), max(256, int(height * scale))
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                width, height = new_w, new_h
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="JPEG", quality=85, optimize=True)
+                raw_bytes = buf.getvalue()
+                extension = "jpg"
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

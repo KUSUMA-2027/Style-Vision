@@ -135,7 +135,7 @@ async def upload_custom_accessory(
     item_id = f"item-acc-custom-{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
     sub = subcategory.lower().strip()
-    if sub not in ("glasses", "earrings", "necklace", "nose_pin", "bracelet", "rings", "bags"):
+    if sub not in ("glasses", "earrings", "necklace", "nose_pin", "bags"):
         sub = "glasses"
 
     doc = {
@@ -290,32 +290,6 @@ async def _seed_catalogue(col):
             "thumbnail": "/catalogue/accessories/diamond_nose_pin.png",
             "tags": ["nose pin", "stud", "crystal"],
             "color": "#FFFFFF",
-            "is_active": True,
-            "created_at": now,
-            "updated_at": None,
-        },
-        {
-            "item_id": "item-acc-5",
-            "name": "Tennis Bracelet",
-            "category": "accessories",
-            "subcategory": "bracelet",
-            "description": "Elegant round-cut CZ diamond tennis bracelet in silver.",
-            "thumbnail": "/catalogue/accessories/tennis_bracelet.png",
-            "tags": ["jewelry", "bracelet", "silver"],
-            "color": "#BDBDBD",
-            "is_active": True,
-            "created_at": now,
-            "updated_at": None,
-        },
-        {
-            "item_id": "item-acc-6",
-            "name": "Solitaire Diamond Ring",
-            "category": "accessories",
-            "subcategory": "rings",
-            "description": "Prong-set round brilliant solitaire on a gold band.",
-            "thumbnail": "/catalogue/accessories/solitaire_diamond_ring.png",
-            "tags": ["jewelry", "ring", "diamond"],
-            "color": "#FFE082",
             "is_active": True,
             "created_at": now,
             "updated_at": None,
