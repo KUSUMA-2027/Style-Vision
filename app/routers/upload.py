@@ -206,3 +206,27 @@ async def get_latest_upload(current_user: dict = Depends(get_current_user)):
         quality_score=doc.get("quality_score", "good"),
         suitability_note=doc.get("suitability_note"),
     )
+
+
+@router.delete(
+    "/reset",
+    summary="Undo everything: delete user's uploaded portrait and all styling session history",
+)
+async def reset_user_portrait_and_session(current_user: dict = Depends(get_current_user)):
+    """
+    Completely deletes the user's active portrait, registered images, and active try-on session.
+    Allows user to start completely fresh with zero lingering portrait or styling state.
+    """
+    user_id = current_user["sub"]
+    db = get_database()
+
+    # 1. Delete user uploads
+    await db["uploads"].delete_many({"user_id": user_id})
+
+    # 2. Delete unified image registry records
+    await db["images"].delete_many({"user_id": user_id})
+
+    # 3. Clean active try-on jobs (keep saved looks in 'looks' collection safe in lookbook)
+    await db["tryon_jobs"].delete_many({"user_id": user_id})
+
+    return {"status": "ok", "message": "All portrait and session data deleted successfully."}
