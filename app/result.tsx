@@ -207,6 +207,14 @@ export default function ResultScreen() {
     }
   };
 
+  const handleTryOnceAgain = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.push(`/try-on/${lookCategory}` as any);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
@@ -338,57 +346,96 @@ export default function ResultScreen() {
 
         {/* Before / After Preview Area */}
         <Card style={styles.previewContainer} variant="elevated">
+          {/* Prominent Engine Source Indicator Pill — shown above the image in Virtual Try-On and Side-by-Side */}
+          {(viewMode === 'split' || viewMode === 'after') && (
+            <View style={styles.aboveImageIndicatorWrap}>
+              <View
+                style={[
+                  styles.aboveImageIndicatorBadge,
+                  isGpu ? styles.tagGpuAbove : styles.tagLocalAbove,
+                ]}
+              >
+                <View style={[styles.engineDot, isGpu ? styles.dotGpu : styles.dotLocal]} />
+                <Text
+                  style={[
+                    styles.aboveImageIndicatorText,
+                    isGpu ? styles.textGpuAbove : styles.textLocalAbove,
+                  ]}
+                >
+                  {engineBadgeText}
+                </Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.zoomHintRow}>
             <Text style={styles.zoomHintText}>🔍 Tap any image to inspect in full zoom</Text>
           </View>
+
           {viewMode === 'split' ? (
-            <View style={styles.splitRow}>
-              {/* Before Column */}
-              <TouchableOpacity
-                style={styles.splitCol}
-                activeOpacity={0.85}
-                onPress={() => openZoom(activeOriginalUrl)}
-              >
-                {activeOriginalUrl ? (
-                  <Image source={{ uri: activeOriginalUrl }} style={styles.imagePreview} resizeMode="cover" />
-                ) : (
-                  <View style={styles.imagePlaceholder}>
-                    <Text style={styles.imageEmoji}>👤</Text>
-                    <Text style={styles.imageTag}>ORIGINAL</Text>
-                  </View>
-                )}
-                <Text style={styles.colLabel}>Before</Text>
-              </TouchableOpacity>
-
-              <View style={styles.dividerCol}>
-                <Text style={styles.dividerIcon}>VS</Text>
-              </View>
-
-              {/* After Column */}
-              <TouchableOpacity
-                style={styles.splitCol}
-                activeOpacity={0.85}
-                onPress={() => openZoom(activeResultUrl)}
-              >
-                <View style={styles.imageWrap}>
-                  {activeResultUrl ? (
-                    <Image source={{ uri: activeResultUrl }} style={styles.imagePreview} resizeMode="cover" />
-                  ) : (
-                    <View style={[styles.imagePlaceholder, styles.styledPlaceholder]}>
-                      <Text style={styles.imageEmoji}>✨</Text>
-                      <Text style={[styles.imageTag, styles.styledTag]}>TRY-ON</Text>
+            <View style={styles.splitSection}>
+              {/* Column labels & source indicator directly above each image */}
+              <View style={styles.splitHeadersRow}>
+                <View style={styles.splitHeaderCol}>
+                  <Text style={styles.colHeaderLabel}>📸 Before</Text>
+                </View>
+                <View style={styles.splitHeaderDividerSpacer}>
+                  <Text style={styles.dividerIconInvisible}>VS</Text>
+                </View>
+                <View style={styles.splitHeaderCol}>
+                  <View style={styles.splitAfterHeaderRow}>
+                    <Text style={styles.colHeaderLabel}>✨ After</Text>
+                    <View style={[styles.miniEngineBadge, isGpu ? styles.tagGpuAbove : styles.tagLocalAbove]}>
+                      <View style={[styles.engineDotMini, isGpu ? styles.dotGpu : styles.dotLocal]} />
+                      <Text style={[styles.miniEngineText, isGpu ? styles.textGpuAbove : styles.textLocalAbove]}>
+                        {isGpu ? 'Cloud GPU' : 'Local AI'}
+                      </Text>
                     </View>
-                  )}
-                  {/* Floating Source Badge */}
-                  <View style={[styles.floatingEngineTag, isGpu ? styles.tagGpu : styles.tagLocal]}>
-                    <View style={[styles.engineDot, isGpu ? styles.dotGpu : styles.dotLocal]} />
-                    <Text style={[styles.floatingEngineText, isGpu ? styles.textGpu : styles.textLocal]}>
-                      {isGpu ? 'CLOUD GPU' : 'LOCAL CPU'}
-                    </Text>
                   </View>
                 </View>
-                <Text style={styles.colLabel}>After Result</Text>
-              </TouchableOpacity>
+              </View>
+
+              <View style={styles.splitRow}>
+                {/* Before Column */}
+                <TouchableOpacity
+                  style={styles.splitCol}
+                  activeOpacity={0.85}
+                  onPress={() => openZoom(activeOriginalUrl)}
+                >
+                  {activeOriginalUrl ? (
+                    <Image source={{ uri: activeOriginalUrl }} style={styles.imagePreview} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Text style={styles.imageEmoji}>👤</Text>
+                      <Text style={styles.imageTag}>ORIGINAL</Text>
+                    </View>
+                  )}
+                  <Text style={styles.colLabel}>Before</Text>
+                </TouchableOpacity>
+
+                <View style={styles.dividerCol}>
+                  <Text style={styles.dividerIcon}>VS</Text>
+                </View>
+
+                {/* After Column */}
+                <TouchableOpacity
+                  style={styles.splitCol}
+                  activeOpacity={0.85}
+                  onPress={() => openZoom(activeResultUrl)}
+                >
+                  <View style={styles.imageWrap}>
+                    {activeResultUrl ? (
+                      <Image source={{ uri: activeResultUrl }} style={styles.imagePreview} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.imagePlaceholder, styles.styledPlaceholder]}>
+                        <Text style={styles.imageEmoji}>✨</Text>
+                        <Text style={[styles.imageTag, styles.styledTag]}>TRY-ON</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.colLabel}>After Result</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : viewMode === 'before' ? (
             <TouchableOpacity
@@ -396,6 +443,7 @@ export default function ResultScreen() {
               activeOpacity={0.85}
               onPress={() => openZoom(activeOriginalUrl)}
             >
+              <Text style={styles.singleViewHeaderLabel}>📸 Unedited Portrait</Text>
               {activeOriginalUrl ? (
                 <Image source={{ uri: activeOriginalUrl }} style={styles.singleImagePreview} resizeMode="contain" />
               ) : (
@@ -412,6 +460,7 @@ export default function ResultScreen() {
               activeOpacity={0.85}
               onPress={() => openZoom(activeResultUrl)}
             >
+              <Text style={styles.singleViewHeaderLabel}>✨ Virtual Style Result</Text>
               <View style={styles.singleImageWrap}>
                 {activeResultUrl ? (
                   <Image source={{ uri: activeResultUrl }} style={styles.singleImagePreview} resizeMode="contain" />
@@ -421,13 +470,6 @@ export default function ResultScreen() {
                     <Text style={[styles.imageTag, styles.styledTag]}>AI SYNTHESIZED</Text>
                   </View>
                 )}
-                {/* Floating Source Tag */}
-                <View style={[styles.floatingEngineTagLarge, isGpu ? styles.tagGpu : styles.tagLocal]}>
-                  <View style={[styles.engineDot, isGpu ? styles.dotGpu : styles.dotLocal]} />
-                  <Text style={[styles.floatingEngineTextLarge, isGpu ? styles.textGpu : styles.textLocal]}>
-                    {engineBadgeText}
-                  </Text>
-                </View>
               </View>
               <Text style={styles.colLabel}>Virtual Style Result</Text>
             </TouchableOpacity>
@@ -480,6 +522,13 @@ export default function ResultScreen() {
             variant="primary"
             size="lg"
             onPress={() => router.push(continueRoute as any)}
+            style={styles.actionBtn}
+          />
+          <Button
+            title="Try Once Again 🔄"
+            variant="outline"
+            size="lg"
+            onPress={handleTryOnceAgain}
             style={styles.actionBtn}
           />
           <Button
@@ -970,6 +1019,108 @@ const styles = StyleSheet.create({
     width: '100%',
     position: 'relative',
     alignItems: 'center',
+  },
+  aboveImageIndicatorWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.sm,
+    width: '100%',
+  },
+  aboveImageIndicatorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1.5,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tagGpuAbove: {
+    backgroundColor: 'rgba(6, 78, 59, 0.95)',
+    borderColor: '#10B981',
+  },
+  tagLocalAbove: {
+    backgroundColor: 'rgba(30, 58, 138, 0.95)',
+    borderColor: '#3B82F6',
+  },
+  aboveImageIndicatorText: {
+    fontSize: 12,
+    fontWeight: Typography.weights.heavy,
+    letterSpacing: 0.6,
+  },
+  textGpuAbove: {
+    color: '#D1FAE5',
+  },
+  textLocalAbove: {
+    color: '#DBEAFE',
+  },
+  splitSection: {
+    width: '100%',
+  },
+  splitHeadersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xs,
+    paddingHorizontal: 2,
+    width: '100%',
+  },
+  splitHeaderCol: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splitHeaderDividerSpacer: {
+    paddingHorizontal: Spacing.sm,
+  },
+  dividerIconInvisible: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: Typography.weights.bold,
+    opacity: 0,
+  },
+  splitAfterHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  colHeaderLabel: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    fontWeight: Typography.weights.bold,
+  },
+  miniEngineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    gap: 4,
+  },
+  engineDotMini: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+  },
+  miniEngineText: {
+    fontSize: 9,
+    fontWeight: Typography.weights.heavy,
+    letterSpacing: 0.3,
+  },
+  singleViewHeaderLabel: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    fontWeight: Typography.weights.bold,
+    marginBottom: Spacing.xs,
+    textAlign: 'center',
   },
   floatingEngineTag: {
     position: 'absolute',

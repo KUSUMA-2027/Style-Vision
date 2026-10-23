@@ -339,6 +339,16 @@ export default function CompleteLookScreen() {
             />
           </View>
           <Button
+            title="Try Once Again 🔄"
+            variant="outline"
+            size="md"
+            onPress={() => {
+              const lastStage = [...appliedStages].reverse()[0] || 'hairstyle';
+              router.push(STAGE_ROUTE[lastStage] as any);
+            }}
+            style={styles.actionBtn}
+          />
+          <Button
             title="Start a New Look"
             variant="ghost"
             size="md"
