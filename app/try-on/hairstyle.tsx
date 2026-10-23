@@ -139,7 +139,7 @@ export default function HairstyleScreen() {
           originalUrl: res.original_image_url,
           closeupResultUrl: res.closeup_result_image_url || '',
           closeupOriginalUrl: res.closeup_original_image_url || '',
-          mode: 'MediaPipe Head Pose Estimation',
+          mode: 'local',
         },
       });
     } catch (err: any) {

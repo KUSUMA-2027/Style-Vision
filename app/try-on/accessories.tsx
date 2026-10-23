@@ -21,25 +21,23 @@ import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { api, getApiBaseUrl } from '@/services/api';
 import { useStylingSession, STAGE_LABEL } from '@/services/session';
 
-type SubCatFilter = 'all' | 'glasses' | 'earrings' | 'necklace' | 'bracelet' | 'rings' | 'nose_pin' | 'bags';
+type SubCatFilter = 'all' | 'glasses' | 'earrings' | 'necklace' | 'nose_pin' | 'bags';
 
 const SUBCAT_LABEL: Record<string, string> = {
   glasses: '👓 Glasses',
   earrings: '✨ Earrings',
   necklace: '📿 Necklace',
-  bracelet: '💎 Bracelet',
-  rings: '💍 Rings',
   nose_pin: '🌟 Nose Pin',
-  bags: '👜 Bags'};
+  bags: '👜 Bags',
+};
 
 const SUBCAT_EMOJI: Record<string, string> = {
   glasses: '👓',
   earrings: '✨',
   necklace: '📿',
-  bracelet: '💎',
-  rings: '💍',
   nose_pin: '🌟',
-  bags: '👜'};
+  bags: '👜',
+};
 
 interface StyleItem {
   item_id: string;
@@ -94,9 +92,9 @@ export default function AccessoriesScreen() {
 
   useEffect(() => { loadCatalogue(); }, [loadCatalogue]);
 
-  const filteredItems = subFilter === 'all'
-    ? items
-    : items.filter((i) => i.subcategory === subFilter);
+  const filteredItems = items
+    .filter((i) => i.subcategory !== 'rings' && i.subcategory !== 'ring' && i.subcategory !== 'bracelet')
+    .filter((i) => subFilter === 'all' || i.subcategory === subFilter);
 
   const handlePickAccessoryPhoto = async (useCamera: boolean = false) => {
     try {
@@ -104,7 +102,7 @@ export default function AccessoriesScreen() {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.9};
+        quality: 0.7};
 
       const result = useCamera
         ? await ImagePicker.launchCameraAsync(options)
@@ -190,7 +188,7 @@ export default function AccessoriesScreen() {
           originalUrl: res.original_image_url,
           closeupResultUrl: res.closeup_result_image_url || '',
           closeupOriginalUrl: res.closeup_original_image_url || '',
-          mode: 'MediaPipe Facial Mesh (468 Landmarks)'}});
+          mode: 'local'}});
     } catch (err: any) {
       Alert.alert('Try-On Error', err.message || 'Could not process accessory placement.');
     } finally {
@@ -278,7 +276,7 @@ export default function AccessoriesScreen() {
         </TouchableOpacity>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          {(['all', 'glasses', 'earrings', 'necklace', 'bracelet', 'rings', 'nose_pin', 'bags'] as SubCatFilter[]).map((key) => {
+          {(['all', 'glasses', 'earrings', 'necklace', 'nose_pin', 'bags'] as SubCatFilter[]).map((key) => {
             const active = subFilter === key;
             return (
               <TouchableOpacity
@@ -304,7 +302,7 @@ export default function AccessoriesScreen() {
         {!loading && error && <ErrorMessage message={error} onRetry={loadCatalogue} />}
         {!loading && !error && filteredItems.length === 0 && (
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptyIcon}>💍</Text>
+            <Text style={styles.emptyIcon}>✨</Text>
             <Text style={styles.emptyText}>No items in this category yet.</Text>
           </View>
         )}
@@ -355,9 +353,8 @@ export default function AccessoriesScreen() {
             earrings: 'Earlobes (Mesh #234, #454)',
             necklace: 'Collarbones (Pose #11, #12)',
             nose_pin: 'Nostril Curve (Mesh #278)',
-            rings: 'Finger Region',
-            bracelet: 'Wrist Pose Point',
-            bags: 'Shoulder Pose (#11)'};
+            bags: 'Shoulder Pose (#11)',
+          };
           return item ? (
             <Card style={styles.descCard} variant="outlined">
               <Text style={styles.descTitle}>{item.name}</Text>

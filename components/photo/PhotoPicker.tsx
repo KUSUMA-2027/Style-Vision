@@ -63,7 +63,7 @@ export const PhotoPicker: React.FC<PhotoPickerProps> = ({
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [3, 4],
-        quality: 0.9,
+        quality: 0.7,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -94,7 +94,7 @@ export const PhotoPicker: React.FC<PhotoPickerProps> = ({
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [3, 4],
-        quality: 0.9,
+        quality: 0.7,
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -167,7 +167,7 @@ export const PhotoPicker: React.FC<PhotoPickerProps> = ({
           {uploading && (
             <View style={styles.overlayLoading}>
               <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={styles.uploadingText}>Validating & Uploading...</Text>
+              <Text style={styles.uploadingText}>Optimizing & Uploading...</Text>
             </View>
           )}
 

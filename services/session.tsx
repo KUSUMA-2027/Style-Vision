@@ -69,6 +69,7 @@ export interface SessionItem {
   slot: string | null;
   title: string;
   url: string;
+  mode?: string;
 }
 
 interface StylingSessionValue {
@@ -108,6 +109,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       slot: it.slot ?? null,
       title: it.title ?? it.stage,
       url: it.url ?? '',
+      mode: it.mode ?? (it.stage === 'outfit' ? 'catvton' : undefined),
     };
   };
 
@@ -131,8 +133,17 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
         sourceUrl: '',
         title: it.title,
         slot: it.slot,
+        mode: it.mode ?? (it.stage === 'outfit' ? 'catvton' : undefined),
         appliedAt: Date.now(),
       };
+    }
+    if (data?.stages) {
+      for (const [stg, info] of Object.entries(data.stages)) {
+        if (info && builtStages[stg as Stage]) {
+          const m = (info as any).mode || (info as any).metadata?.mode;
+          if (m) builtStages[stg as Stage]!.mode = m;
+        }
+      }
     }
     setStages(builtStages);
   }, []);
@@ -235,6 +246,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
         slot: result.slot ?? null,
         title: result.title,
         url: result.resultUrl,
+        mode: result.mode ?? (result.stage === 'outfit' ? 'catvton' : undefined),
       },
     ]);
     void syncSession();

@@ -141,7 +141,7 @@ export default function OutfitTryOnScreen() {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [3, 4],
-        quality: 0.85};
+        quality: 0.7};
 
       const result = useCamera
         ? await ImagePicker.launchCameraAsync(options)

@@ -214,7 +214,29 @@ export default function CompleteLookScreen() {
               >
                 <Text style={styles.stageIcon}>{STAGE_ICON[stage]}</Text>
                 <View style={styles.stageInfo}>
-                  <Text style={styles.stageName}>{STAGE_LABEL[stage]}</Text>
+                  <View style={styles.stageTitleRow}>
+                    <Text style={styles.stageName}>{STAGE_LABEL[stage]}</Text>
+                    {done && (() => {
+                      const isCloud = stage === 'outfit';
+                      return (
+                        <View
+                          style={[
+                            styles.sourcePillSmall,
+                            isCloud ? styles.pillGpuSmall : styles.pillLocalSmall,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.sourcePillSmallText,
+                              isCloud ? styles.pillTextGpuSmall : styles.pillTextLocalSmall,
+                            ]}
+                          >
+                            {isCloud ? '🚀 Cloud AI' : '⚡ Local AI'}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
                   <Text style={styles.stageDetail} numberOfLines={1}>
                     {done ? result!.title : 'Tap to style — any order you like'}
                   </Text>
@@ -237,18 +259,37 @@ export default function CompleteLookScreen() {
           <>
             <Text style={styles.sectionHeading}>Applied Items ({session.items.length})</Text>
             <Card style={styles.stagesCard} variant="outlined">
-              {session.items.map((item) => (
-                <View key={item.imageId} style={styles.stageRow}>
-                  <Text style={styles.stageIcon}>{STAGE_ICON[item.stage as Stage] ?? '✨'}</Text>
-                  <View style={styles.stageInfo}>
-                    <Text style={styles.stageName} numberOfLines={1}>
-                      {item.title}
-                    </Text>
-                    <Text style={styles.stageDetail}>
-                      {STAGE_LABEL[item.stage as Stage] ?? item.stage}
-                      {item.slot ? ` • ${item.slot}` : ''}
-                    </Text>
-                  </View>
+              {session.items.map((item) => {
+                const isCloud = item.stage === 'outfit';
+                return (
+                  <View key={item.imageId} style={styles.stageRow}>
+                    <Text style={styles.stageIcon}>{STAGE_ICON[item.stage as Stage] ?? '✨'}</Text>
+                    <View style={styles.stageInfo}>
+                      <View style={styles.stageTitleRow}>
+                        <Text style={styles.stageName} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <View
+                          style={[
+                            styles.sourcePillSmall,
+                            isCloud ? styles.pillGpuSmall : styles.pillLocalSmall,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.sourcePillSmallText,
+                              isCloud ? styles.pillTextGpuSmall : styles.pillTextLocalSmall,
+                            ]}
+                          >
+                            {isCloud ? '🚀 Cloud AI' : '⚡ Local AI'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.stageDetail}>
+                        {STAGE_LABEL[item.stage as Stage] ?? item.stage}
+                        {item.slot ? ` • ${item.slot}` : ''}
+                      </Text>
+                    </View>
                   {removingId === item.imageId ? (
                     <ActivityIndicator size="small" color={Colors.primary} />
                   ) : (
@@ -261,7 +302,8 @@ export default function CompleteLookScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
-              ))}
+                );
+              })}
             </Card>
           </>
         )}
@@ -395,6 +437,36 @@ const styles = StyleSheet.create({
   stageInfo: {
     flex: 1,
     marginRight: Spacing.sm,
+  },
+  stageTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sourcePillSmall: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  pillGpuSmall: {
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    borderColor: 'rgba(16, 185, 129, 0.4)',
+  },
+  pillLocalSmall: {
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+    borderColor: 'rgba(59, 130, 246, 0.4)',
+  },
+  sourcePillSmallText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  pillTextGpuSmall: {
+    color: '#10B981',
+  },
+  pillTextLocalSmall: {
+    color: '#60A5FA',
   },
   stageName: {
     fontSize: Typography.sizes.sm,

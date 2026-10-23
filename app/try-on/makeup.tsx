@@ -130,7 +130,7 @@ export default function MakeupStudioScreen() {
           originalUrl: res.original_image_url,
           closeupResultUrl: res.closeup_result_image_url || '',
           closeupOriginalUrl: res.closeup_original_image_url || '',
-          mode: 'OpenCV + MediaPipe Landmark Alpha-Blending',
+          mode: 'local',
         },
       });
     } catch (err: any) {
