@@ -185,132 +185,133 @@ def _suppress_original_hair(
     hair_transformed: np.ndarray,
     paste_x: int,
     paste_y: int,
+    hairstyle_filename: str = "",
 ) -> Image.Image:
     """
-    Trims and hides the person's natural original hair in the background that falls outside
-    the new hairstyle silhouette (especially for updos, sleek high ponytails, or short bobs).
-    Guarantees:
-      - Face (forehead, brows, eyes, nose, cheeks, mouth, jaw, chin) is 100% PROTECTED.
-      - Ears, neck column, shoulders, and clothes remain 100% intact.
-      - Original hair outside the new hairstyle is smoothly blended into the portrait background.
+    Trims/inpaints stray strands of natural hair sticking out into the background
+    for short/updo cuts (high ponytail, bob) while leaving the original photo's
+    real background, face, ears, neck, shoulders, and clothing 100% untouched.
     """
+    # Long flowing styles like beach waves or soft curls naturally cover the head and neck.
+    if hairstyle_filename and hairstyle_filename not in ("sleek_high_ponytail.png", "classic_french_bob.png"):
+        return person_img.convert("RGBA")
+
+    if pts is None or 10 not in pts or 152 not in pts or 234 not in pts or 454 not in pts:
+        return person_img.convert("RGBA")
+
     orig_bgr = cv2.cvtColor(np.array(person_img.convert("RGB")), cv2.COLOR_RGB2BGR)
     h, w = orig_bgr.shape[:2]
 
-    # 1. Background Reconstruction (Horizontal Studio Gradient)
-    strip_w = max(10, int(w * 0.05))
-    col_left = cv2.medianBlur(orig_bgr[:, 0:strip_w], 15).mean(axis=1)
-    col_right = cv2.medianBlur(orig_bgr[:, max(0, w - strip_w):w], 15).mean(axis=1)
-    xs = np.linspace(0, 1, w).reshape(1, w, 1)
-    bg_canvas = (1.0 - xs) * col_left.reshape(h, 1, 3) + xs * col_right.reshape(h, 1, 3)
-    bg_canvas = np.clip(bg_canvas, 0, 255).astype(np.uint8)
+    p_forehead = pts[10]
+    p_chin = pts[152]
+    p_l_ear = pts[234]
+    p_r_ear = pts[454]
+    face_w = float(np.linalg.norm(p_r_ear - p_l_ear))
+    face_h = float(np.linalg.norm(p_chin - p_forehead))
+    face_cx = float((p_l_ear[0] + p_r_ear[0]) / 2.0)
 
-    # 2. Construct Anatomical Protection Mask (Never Modified)
+    # 1. Sample True Local Background immediately adjacent to cranial perimeter
+    x_bg_l1 = max(0, int(face_cx - face_w * 1.5))
+    x_bg_l2 = max(0, int(face_cx - face_w * 1.05))
+    x_bg_r1 = min(w, int(face_cx + face_w * 1.05))
+    x_bg_r2 = min(w, int(face_cx + face_w * 1.5))
+    y_bg_1 = max(0, int(p_forehead[1] - face_h * 0.2))
+    y_bg_2 = min(h, int(p_chin[1]))
+
+    bg_l_sample = orig_bgr[y_bg_1:y_bg_2, x_bg_l1:x_bg_l2]
+    bg_r_sample = orig_bgr[y_bg_1:y_bg_2, x_bg_r1:x_bg_r2]
+    bg_l_color = bg_l_sample.mean(axis=(0, 1)) if bg_l_sample.size > 0 else np.array([220, 220, 220])
+    bg_r_color = bg_r_sample.mean(axis=(0, 1)) if bg_r_sample.size > 0 else np.array([220, 220, 220])
+
+    # 2. Construct 100% Anatomical Body & Head Protection Mask
     protected = np.zeros((h, w), dtype=np.uint8)
+    face_oval_idx = [
+        10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379,
+        378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127,
+        162, 21, 54, 103, 67, 109
+    ]
+    face_pts = [pts[i] for i in face_oval_idx if i in pts]
+    if len(face_pts) >= 10:
+        face_poly = np.array(face_pts, dtype=np.int32)
+        cv2.fillPoly(protected, [face_poly], 255)
 
-    if pts is not None and 10 in pts and 152 in pts and 234 in pts and 454 in pts:
-        # 2a. Face Oval: 36 standard MediaPipe FaceMesh contour points
-        face_oval_idx = [
-            10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379,
-            378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127,
-            162, 21, 54, 103, 67, 109
-        ]
-        face_pts = [pts[i] for i in face_oval_idx if i in pts]
-        if len(face_pts) >= 10:
-            face_poly = np.array(face_pts, dtype=np.int32)
-            cv2.fillPoly(protected, [face_poly], 255)
+    ear_r = int(face_w * 0.16)
+    cv2.circle(protected, (int(p_l_ear[0]), int(p_l_ear[1])), ear_r, 255, -1)
+    cv2.circle(protected, (int(p_r_ear[0]), int(p_r_ear[1])), ear_r, 255, -1)
 
-        p_forehead = pts[10]
-        p_chin = pts[152]
-        p_l_ear = pts[234]
-        p_r_ear = pts[454]
-        face_w = float(np.linalg.norm(p_r_ear - p_l_ear))
-        face_h = float(np.linalg.norm(p_chin - p_forehead))
-        face_cx = float((p_l_ear[0] + p_r_ear[0]) / 2.0)
-
-        # 2b. Ears
-        ear_r = int(face_w * 0.16)
-        cv2.circle(protected, (int(p_l_ear[0]), int(p_l_ear[1])), ear_r, 255, -1)
-        cv2.circle(protected, (int(p_r_ear[0]), int(p_r_ear[1])), ear_r, 255, -1)
-
-        # 2c. Neck & Torso Protection
-        p_l_jaw = pts.get(172, p_l_ear)
-        p_r_jaw = pts.get(397, p_r_ear)
-
-        pose = detect_pose_landmarks(cv2.cvtColor(orig_bgr, cv2.COLOR_BGR2RGB))
-        if pose and pose.get("has_pose"):
-            sh_left = pose["left_shoulder"]
-            sh_right = pose["right_shoulder"]
-            shoulder_y = float(min(sh_left[1], sh_right[1]))
-        else:
-            shoulder_y = float(p_chin[1] + face_h * 0.55)
-
-        neck_base_l = [face_cx - face_w * 0.38, shoulder_y]
-        neck_base_r = [face_cx + face_w * 0.38, shoulder_y]
-
-        neck_poly = np.array([
-            p_l_jaw, p_chin, p_r_jaw, neck_base_r, neck_base_l
-        ], dtype=np.int32)
-        cv2.fillPoly(protected, [neck_poly], 255)
-
-        # Torso and clothing below shoulder line
-        cv2.rectangle(protected, (0, int(shoulder_y)), (w, h), 255, -1)
+    pose = detect_pose_landmarks(cv2.cvtColor(orig_bgr, cv2.COLOR_BGR2RGB))
+    if pose and pose.get("has_pose"):
+        sh_left = pose["left_shoulder"]
+        sh_right = pose["right_shoulder"]
+        sh_img_l = sh_left if sh_left[0] < sh_right[0] else sh_right
+        sh_img_r = sh_right if sh_left[0] < sh_right[0] else sh_left
+        shoulder_y = float(min(sh_left[1], sh_right[1]))
     else:
-        # Fallback when landmarks unavailable
-        face_cx = float(w * 0.5)
-        face_w = float(w * 0.35)
-        shoulder_y = float(h * 0.45)
-        cv2.ellipse(protected, (int(w * 0.5), int(h * 0.30)), (int(w * 0.18), int(h * 0.22)), 0, 0, 360, 255, -1)
-        cv2.rectangle(protected, (0, int(h * 0.45)), (w, h), 255, -1)
+        shoulder_y = float(p_chin[1] + face_h * 0.55)
+        sh_img_l = np.array([face_cx - face_w * 1.4, shoulder_y])
+        sh_img_r = np.array([face_cx + face_w * 1.4, shoulder_y])
 
-    # 3. New Hairstyle Silhouette
+    y_neck_base = float(p_chin[1] + (shoulder_y - p_chin[1]) * 0.35)
+    neck_base_l = [face_cx - face_w * 0.40, y_neck_base]
+    neck_base_r = [face_cx + face_w * 0.40, y_neck_base]
+    deltoid_l = [sh_img_l[0] - face_w * 0.40, sh_img_l[1] + face_w * 0.20]
+    deltoid_r = [sh_img_r[0] + face_w * 0.40, sh_img_r[1] + face_w * 0.20]
+
+    body_poly = np.array([
+        pts.get(172, p_l_ear), p_chin, pts.get(397, p_r_ear),
+        neck_base_r, sh_img_r, deltoid_r,
+        [w, int(deltoid_r[1])], [w, h], [0, h], [0, int(deltoid_l[1])],
+        deltoid_l, sh_img_l, neck_base_l
+    ], dtype=np.int32)
+    cv2.fillPoly(protected, [body_poly], 255)
+    cv2.rectangle(protected, (0, int(shoulder_y)), (w, h), 255, -1)
+
+    # 3. New Hair Silhouette
     th, tw = hair_transformed.shape[:2]
     hair_mask = np.zeros((h, w), dtype=np.uint8)
     alpha = hair_transformed[:, :, 3]
-
     y1 = max(0, paste_y)
     y2 = min(h, paste_y + th)
     x1 = max(0, paste_x)
     x2 = min(w, paste_x + tw)
-
     ay1 = max(0, -paste_y)
     ay2 = ay1 + (y2 - y1)
     ax1 = max(0, -paste_x)
     ax2 = ax1 + (x2 - x1)
-
     if y2 > y1 and x2 > x1:
         hair_mask[y1:y2, x1:x2] = alpha[ay1:ay2, ax1:ax2]
 
-    # Dilate new hair silhouette slightly so new hair naturally overlaps the background
-    hair_mask_dilated = cv2.dilate(
-        hair_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)), iterations=1
-    )
+    hair_mask_dilated = cv2.dilate(hair_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)))
 
-    # 4. Candidate Trim Region (Lateral to head/neck, above shoulders)
+    # 4. Tight Cranial Bounding Box: ONLY within 0.95*face_w of head center, stops 20px ABOVE shoulders!
     head_bbox_mask = np.zeros((h, w), dtype=np.uint8)
-    ymin = max(0, paste_y - 35)
-    ymax = min(h, int(shoulder_y + 10))
-    xmin = max(0, int(face_cx - face_w * 2.2))
-    xmax = min(w, int(face_cx + face_w * 2.2))
+    ymin = max(0, int(p_forehead[1] - face_h * 0.3))
+    ymax = max(ymin + 10, int(shoulder_y - 20))
+    xmin = max(0, int(face_cx - face_w * 0.95))
+    xmax = min(w, int(face_cx + face_w * 0.95))
     head_bbox_mask[ymin:ymax, xmin:xmax] = 255
 
-    # Any pixel in candidate box that is outside protected face/body and outside new hair
-    trim_mask = cv2.bitwise_and(head_bbox_mask, cv2.bitwise_not(protected))
-    trim_mask = cv2.bitwise_and(trim_mask, cv2.bitwise_not(hair_mask_dilated))
+    candidate = cv2.bitwise_and(head_bbox_mask, cv2.bitwise_not(protected))
+    candidate = cv2.bitwise_and(candidate, cv2.bitwise_not(hair_mask_dilated))
 
-    # 5. Soft feathering for seamless blending
-    trim_mask_feathered = cv2.GaussianBlur(trim_mask.astype(np.float32) / 255.0, (17, 17), 5)
-    trim_mask_3d = trim_mask_feathered[:, :, np.newaxis]
+    # 5. Identify ONLY true stray hair pixels (significantly different from local background)
+    xs = np.linspace(0, 1, w).reshape(1, w, 1)
+    bg_local_interp = (1.0 - xs) * bg_l_color.reshape(1, 1, 3) + xs * bg_r_color.reshape(1, 1, 3)
+    color_dist = np.linalg.norm(orig_bgr.astype(float) - bg_local_interp, axis=2)
 
-    # 6. Clean canvas: blend original with background in trim region
-    cleaned_bgr = (
-        orig_bgr.astype(np.float32) * (1.0 - trim_mask_3d)
-        + bg_canvas.astype(np.float32) * trim_mask_3d
-    ).astype(np.uint8)
+    hair_strands_mask = np.where((candidate > 0) & (color_dist > 35.0), 255, 0).astype(np.uint8)
+    hair_strands_mask = cv2.morphologyEx(hair_strands_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+
+    protected_buffer = cv2.dilate(protected, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    hair_strands_mask[protected_buffer > 0] = 0
+
+    if (hair_strands_mask > 0).sum() > 20:
+        cleaned_bgr = cv2.inpaint(orig_bgr, hair_strands_mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+    else:
+        cleaned_bgr = orig_bgr
 
     cleaned_rgba = cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGBA)
     return Image.fromarray(cleaned_rgba, mode="RGBA")
-
 
 def synthesize_hairstyle_tryon(
     person_img: Image.Image,
@@ -337,6 +338,9 @@ def synthesize_hairstyle_tryon(
         face_cx = float(w * 0.5)
         face_w = float(w * 0.35)
         face_h = float(h * 0.25)
+        head_w = face_w
+        dynamic_head_size = face_w
+        h_ratio_mod = 1.0
         eyebrow_y = float(forehead_pt[1] + face_h * 0.2)
         angle_deg = 0.0
         landmark_summary = "Proportional head-crown estimate"
@@ -350,16 +354,30 @@ def synthesize_hairstyle_tryon(
         p_r_eyebrow = pts.get(336, p_forehead)
         eyebrow_y = float(min(p_l_eyebrow[1], p_r_eyebrow[1]))
 
-        face_w = float(np.linalg.norm(p_right_ear - p_left_ear))
+        # Dynamic Multi-Point Cranial Measurements
+        ear_span = float(np.linalg.norm(p_right_ear - p_left_ear))
+        zygo_span = float(np.linalg.norm(pts[356] - pts[127])) if 127 in pts and 356 in pts else ear_span
+        temple_span = float(np.linalg.norm(pts[284] - pts[54])) if 54 in pts and 284 in pts else ear_span
+        cranial_w = max(ear_span, zygo_span, temple_span * 1.15)
+
         face_h = float(np.linalg.norm(p_chin - p_forehead))
+        head_w = max(cranial_w, face_h * 0.76)
         face_cx = float((p_left_ear[0] + p_right_ear[0]) / 2.0)
+
+        # Dynamic composite head size combining width and cranial height
+        dynamic_head_size = 0.65 * head_w + 0.35 * (face_h / 1.22)
+        head_aspect_ratio = face_h / max(1.0, head_w)
+        h_ratio_mod = float(np.clip(head_aspect_ratio / 1.22, 0.90, 1.12))
 
         dx = p_right_ear[0] - p_left_ear[0]
         dy = p_right_ear[1] - p_left_ear[1]
         angle_deg = float(math.degrees(math.atan2(dy, dx)))
 
         forehead_pt = p_forehead
-        landmark_summary = f"Forehead anchor #10, Ear span #234 <-> #454 (roll={angle_deg:.1f} deg)"
+        landmark_summary = (
+            f"Dynamic Head Fit: width={head_w:.0f}px, height={face_h:.0f}px "
+            f"(scale={dynamic_head_size:.0f}px, roll={angle_deg:.1f}°)"
+        )
 
     # 1. Load hairstyle asset
     hair_asset_pil = _get_or_create_hair_asset(style_item_id, subcategory)
@@ -379,14 +397,16 @@ def synthesize_hairstyle_tryon(
         {"top_y": 140, "cx": 384.5, "cw": 385.0, "margin": 1.18, "anchor": "forehead", "y_shift": -4}
     )
 
-    # 4. Scale hairstyle to head cranial dimensions
+    # 4. Scale hairstyle dynamically to model's head size and cranial aspect ratio
     ah, aw = hair_rgba.shape[:2]
-    final_scale = (face_w * prof["margin"]) / prof["cw"]
+    final_scale_w = (dynamic_head_size * prof["margin"]) / prof["cw"]
     if scale_override is not None:
-        final_scale = final_scale * scale_override
+        final_scale_w = final_scale_w * scale_override
 
-    target_w = max(60, int(aw * final_scale))
-    target_h = max(60, int(ah * final_scale))
+    final_scale_h = final_scale_w * h_ratio_mod
+
+    target_w = max(60, int(aw * final_scale_w))
+    target_h = max(60, int(ah * final_scale_h))
     hair_resized = cv2.resize(hair_rgba, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
 
     # 5. Rotate by head roll angle
@@ -412,8 +432,8 @@ def synthesize_hairstyle_tryon(
     else:
         anchor_y = forehead_pt[1]
 
-    paste_x = int(face_cx - (prof["cx"] * final_scale))
-    paste_y = int(anchor_y - (prof["top_y"] * final_scale) + prof.get("y_shift", 0))
+    paste_x = int(face_cx - (prof["cx"] * final_scale_w))
+    paste_y = int(anchor_y - (prof["top_y"] * final_scale_h) + prof.get("y_shift", 0))
 
     # Apply manual user offsets if provided
     if offset_x is not None:
@@ -424,7 +444,7 @@ def synthesize_hairstyle_tryon(
     # 6. Suppress Original Background Hair
     # Clean/trim any natural hair that falls outside the new hairstyle silhouette,
     # keeping face, ears, neck, shoulders, and clothing 100% untouched.
-    canvas_pil = _suppress_original_hair(person_img, pts, hair_transformed, paste_x, paste_y)
+    canvas_pil = _suppress_original_hair(person_img, pts, hair_transformed, paste_x, paste_y, filename)
     W, H = canvas_pil.size
 
     # Clean Alpha Composition of New Hairstyle
