@@ -51,6 +51,57 @@ ACCESSORY_ASSET_MAP = {
 }
 
 
+def _trim_to_alpha_bbox(img: Image.Image) -> Image.Image:
+    """Crops transparent padding around the accessory so (0,0)-(w,h) tightly bounds the object."""
+    arr = np.array(img)
+    if arr.ndim != 3 or arr.shape[2] != 4:
+        return img
+    alpha = arr[:, :, 3]
+    ys, xs = np.where(alpha > 15)
+    if len(xs) > 0 and len(ys) > 0:
+        x1, x2 = int(xs.min()), int(xs.max())
+        y1, y2 = int(ys.min()), int(ys.max())
+        w, h = img.size
+        x1 = max(0, x1 - 1)
+        y1 = max(0, y1 - 1)
+        x2 = min(w, x2 + 2)
+        y2 = min(h, y2 + 2)
+        return img.crop((x1, y1, x2, y2))
+    return img
+
+
+def _detect_glasses_geometry(acc_img: Image.Image) -> Tuple[float, float, float]:
+    """
+    Scans the eyewear asset to calculate:
+    - lens_spacing (distance between left and right optical centers)
+    - optical_center_y_ratio (fractional Y position of the optical line, default ~0.46)
+    - optical_center_x_ratio (fractional X position of the bridge, default ~0.50)
+    """
+    arr = np.array(acc_img)
+    alpha = arr[:, :, 3]
+    h, w = alpha.shape
+    
+    left_alpha = alpha[:, :w // 2]
+    right_alpha = alpha[:, w // 2:]
+    
+    ly, lx = np.where(left_alpha > 40)
+    ry, rx = np.where(right_alpha > 40)
+    
+    if len(lx) > 20 and len(rx) > 20:
+        rx = rx + (w // 2)
+        left_lens_x = float(np.mean(lx))
+        left_lens_y = float(np.mean(ly))
+        right_lens_x = float(np.mean(rx))
+        right_lens_y = float(np.mean(ry))
+        
+        lens_spacing = right_lens_x - left_lens_x
+        opt_y = (left_lens_y + right_lens_y) / (2.0 * h)
+        opt_x = (left_lens_x + right_lens_x) / (2.0 * w)
+        return lens_spacing, opt_y, opt_x
+    
+    return float(w * 0.512), 0.46, 0.50
+
+
 def _clean_accessory_background(img: Image.Image) -> Image.Image:
     """If image is not already transparent RGBA, remove white/solid background."""
     img_rgba = img.convert("RGBA")
@@ -67,7 +118,8 @@ def _clean_accessory_background(img: Image.Image) -> Image.Image:
     arr[-4:, :, 3] = 0.0
     arr[:, :3, 3] = 0.0
     arr[:, -3:, 3] = 0.0
-    return Image.fromarray(arr.astype(np.uint8), "RGBA")
+    cleaned = Image.fromarray(arr.astype(np.uint8), "RGBA")
+    return _trim_to_alpha_bbox(cleaned)
 
 
 def _get_accessory_image(
@@ -128,7 +180,8 @@ def _get_accessory_image(
         for base in [settings.catalogue_dir, os.path.join("backend", "catalogue")]:
             asset_path = os.path.join(base, "accessories", filename)
             if os.path.exists(asset_path):
-                return Image.open(asset_path).convert("RGBA")
+                raw_asset = Image.open(asset_path).convert("RGBA")
+                return _trim_to_alpha_bbox(raw_asset)
 
     logger.warning("Accessory asset '%s' not found for subcategory '%s'.", filename, subcategory)
     return None
@@ -186,42 +239,57 @@ def synthesize_accessory_tryon(
 
         # ── 1. GLASSES & SUNGLASSES ──────────────────────────────────────────
         if "glass" in subcat or subcat == "glasses":
-            # Landmarks: #33 (left outer eye), #263 (right outer eye), #168 (nasion bridge)
-            p_left = pt(33)
-            p_right = pt(263)
+            # Pupil & Eye Landmarks: #468 (left pupil), #473 (right pupil), #33/#133, #263/#362
+            # Bridge Landmarks: #168 (nasion bridge)
+            p_pupil_l = pt(468) if 468 in landmarks else (pt(33) + pt(133)) / 2.0
+            p_pupil_r = pt(473) if 473 in landmarks else (pt(263) + pt(362)) / 2.0
             p_bridge = pt(168)
             
-            dx = p_right[0] - p_left[0]
-            dy = p_right[1] - p_left[1]
+            # Midpoint between the two eyes/pupils
+            mid_eye = (p_pupil_l + p_pupil_r) / 2.0
+            
+            dx = p_pupil_r[0] - p_pupil_l[0]
+            dy = p_pupil_r[1] - p_pupil_l[1]
             angle_deg = -math.degrees(math.atan2(dy, dx))
-            eye_dist = math.hypot(dx, dy)
+            ipd = math.hypot(dx, dy)
+            
+            # Detect optical geometry of the eyewear asset
+            lens_dist, opt_y_ratio, opt_x_ratio = _detect_glasses_geometry(acc_img)
+            acc_w, acc_h = acc_img.size
             
             scale_factor = override_scale if override_scale else 1.0
-            # Width spans across temple-to-temple naturally (calibrated to orbital eye distance)
-            target_w = int(eye_dist * 1.62 * scale_factor)
-            target_h = int(target_w * (acc_img.height / acc_img.width))
+            # Scale glasses so distance between lens centers matches user's inter-pupillary distance
+            target_w = int((ipd * (acc_w / max(10.0, lens_dist))) * scale_factor)
+            target_h = int(target_w * (acc_h / acc_w))
             
             resized = acc_img.resize((max(10, target_w), max(10, target_h)), Image.Resampling.LANCZOS)
             rotated = resized.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
             
-            # The bridge saddle sits centered right on the nasion #168
-            # Anchor vertical center at the nose bridge so glasses sit at eye level
-            cx = p_bridge[0]
-            cy = p_bridge[1]
+            # Sub-pixel alignment: map optical center of eyewear directly onto mid_eye
+            opt_x = opt_x_ratio * target_w
+            opt_y = opt_y_ratio * target_h
+            dx_opt = opt_x - (target_w / 2.0)
+            dy_opt = opt_y - (target_h / 2.0)
+            
+            rad = -math.radians(angle_deg)
+            rot_opt_x = (rotated.width / 2.0) + (dx_opt * math.cos(rad) - dy_opt * math.sin(rad))
+            rot_opt_y = (rotated.height / 2.0) + (dx_opt * math.sin(rad) + dy_opt * math.cos(rad))
+            
+            cx = mid_eye[0]
+            cy = mid_eye[1]
             if override_x is not None:
                 cx = override_x * pw
             if override_y is not None:
                 cy = override_y * ph
-            # Apply manual pixel offsets (only if no normalized override)
             if override_x is None and offset_x is not None:
                 cx += offset_x
             if override_y is None and offset_y is not None:
                 cy += offset_y
                 
-            paste_x = int(cx - (rotated.width / 2))
-            paste_y = int(cy - (rotated.height / 2))
+            paste_x = int(cx - rot_opt_x)
+            paste_y = int(cy - rot_opt_y)
             canvas.alpha_composite(rotated, (paste_x, paste_y))
-            landmark_desc = f"Eye Bridge (Mesh #168, angle {angle_deg:.1f} deg)"
+            landmark_desc = f"Pupil & Eye Bridge Alignment (IPD {ipd:.1f}px, angle {angle_deg:.1f} deg)"
 
         # ── 2. EARRINGS ──────────────────────────────────────────────────────
         elif "earring" in subcat or subcat == "earrings":
@@ -239,9 +307,9 @@ def synthesize_accessory_tryon(
             
             resized_earring = acc_img.resize((max(8, earring_w), max(8, earring_h)), Image.Resampling.LANCZOS)
             
-            # Hook anchors at the bottom of the earlobe
-            left_ear_y = int(p_left_ear[1] + (face_h * 0.04))
-            right_ear_y = int(p_right_ear[1] + (face_h * 0.04))
+            # Hook anchors precisely at the bottom of the earlobe (1.5% face_h below earlobe landmark)
+            left_ear_y = int(p_left_ear[1] + (face_h * 0.015))
+            right_ear_y = int(p_right_ear[1] + (face_h * 0.015))
             
             # Left Earring
             lx = int(p_left_ear[0] - (earring_w * 0.5))
@@ -258,7 +326,7 @@ def synthesize_accessory_tryon(
 
         # ── 3. NECKLACE ──────────────────────────────────────────────────────
         elif "necklace" in subcat:
-            # Anchor at suprasternal notch / collarbone hollow right below chin
+            # Anchor at the throat contour right below chin, embracing the neck with NO extra gap
             p_chin = pt(152)
             p_forehead = pt(10)
             p_left_ear = pt(234)
@@ -267,46 +335,102 @@ def synthesize_accessory_tryon(
             face_h = math.hypot(p_chin[0] - p_forehead[0], p_chin[1] - p_forehead[1])
             face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
             
+            # Scan neck and shoulder width
             scale_factor = override_scale if override_scale else 1.0
-            # Width spans naturally across collarbones (1.15x face width, not 1.85x)
-            target_w = int(face_w * 1.15 * scale_factor)
+            sh_span = pose.get("shoulder_span") if (pose and pose.get("has_pose")) else int(face_w * 2.8)
+            shoulder_center = pose.get("shoulder_center") if (pose and pose.get("has_pose")) else None
+            
+            # Natural necklace width: spans across the clavicles / inner collarbones
+            target_w = int(min(face_w * 1.18, sh_span * 0.50) * scale_factor)
             target_h = int(target_w * (acc_img.height / acc_img.width))
             
             resized_neck = acc_img.resize((max(20, target_w), max(20, target_h)), Image.Resampling.LANCZOS)
             
+            # Angle following the head and neck tilt
             dx = p_right_ear[0] - p_left_ear[0]
             dy = p_right_ear[1] - p_left_ear[1]
             angle_deg = -math.degrees(math.atan2(dy, dx))
+            
+            if pose and pose.get("has_pose"):
+                p_ls = pose.get("left_shoulder")
+                p_rs = pose.get("right_shoulder")
+                if p_ls is not None and p_rs is not None:
+                    dx_sh = p_ls[0] - p_rs[0]
+                    dy_sh = p_ls[1] - p_rs[1]
+                    angle_sh = -math.degrees(math.atan2(dy_sh, dx_sh))
+                    # Natural gravitational hang blending head tilt and torso orientation
+                    angle_deg = 0.65 * angle_deg + 0.35 * angle_sh
+                    
             rotated_neck = resized_neck.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
             
+            # X center follows the midline of the neck between chin and sternum
             cx = p_chin[0]
-            # Collarbone anchor sits naturally at the suprasternal notch (32% face height below chin)
-            cy = p_chin[1] + (face_h * 0.32)
+            if shoulder_center is not None:
+                cx = float(p_chin[0] * 0.40 + shoulder_center[0] * 0.60)
+                
+            # Y position: top of the chain begins right at the throat contour below chin (3.5% of face height)
+            # This completely eliminates any floating gap between the chin/neck and the necklace!
+            neck_top_y = p_chin[1] + (face_h * 0.035)
+            
             if override_x is not None:
                 cx = override_x * pw
             if override_y is not None:
-                cy = override_y * ph
+                neck_top_y = override_y * ph
+            if override_x is None and offset_x is not None:
+                cx += offset_x
+            if override_y is None and offset_y is not None:
+                neck_top_y += offset_y
                 
-            paste_x = int(cx - (rotated_neck.width / 2))
-            paste_y = int(cy)
+            paste_x = int(cx - (rotated_neck.width / 2.0))
+            paste_y = int(neck_top_y)
             canvas.alpha_composite(rotated_neck, (paste_x, paste_y))
-            landmark_desc = f"Collarbone Notch (Suprasternal #152, angle {angle_deg:.1f} deg)"
+            landmark_desc = f"Anatomical Neck & Clavicle Fit (Zero-Gap, angle {angle_deg:.1f} deg)"
 
         # ── 4. NOSE PIN ──────────────────────────────────────────────────────
         elif "nose" in subcat:
-            p_nostril = pt(278) # Left nostril ala
-            p_bridge = pt(168)
             p_tip = pt(1)
+            p_bridge = pt(168)
+            p_eye_left = pt(33)   # viewer's left / model's right eye
+            p_eye_right = pt(263) # viewer's right / model's left eye
             
             nose_len = math.hypot(p_tip[0] - p_bridge[0], p_tip[1] - p_bridge[1])
             scale_factor = override_scale if override_scale else 1.0
-            pin_size = max(10, int(nose_len * 0.24 * scale_factor))
+            # Natural diamond nose stud scale: 12% of nose length (subtle, delicate, realistic)
+            pin_size = max(8, int(nose_len * 0.12 * scale_factor))
             
+            # Scan face yaw / orientation to place pin on the camera-facing nostril
+            dist_l = abs(p_tip[0] - p_eye_left[0])
+            dist_r = abs(p_tip[0] - p_eye_right[0])
+            
+            if dist_l < dist_r * 0.65:
+                # Head turned towards model's left (viewer's right) -> model's right nostril is prominent
+                p_crease = pt(48)
+                p_lobule = pt(240) if 240 in landmarks else p_crease
+                pierce_x = p_lobule[0] * 0.70 + p_tip[0] * 0.30
+                pierce_y = p_lobule[1] * 0.55 + p_crease[1] * 0.45
+                nostril_name = "Right Nostril Alar Curve"
+            else:
+                # Default / model facing forward or turned right -> model's left nostril (#278 / #460)
+                p_crease = pt(278)
+                p_lobule = pt(460) if 460 in landmarks else p_crease
+                pierce_x = p_lobule[0] * 0.70 + p_tip[0] * 0.30
+                pierce_y = p_lobule[1] * 0.55 + p_crease[1] * 0.45
+                nostril_name = "Left Nostril Alar Curve"
+                
+            if override_x is not None:
+                pierce_x = override_x * pw
+            if override_y is not None:
+                pierce_y = override_y * ph
+            if override_x is None and offset_x is not None:
+                pierce_x += offset_x
+            if override_y is None and offset_y is not None:
+                pierce_y += offset_y
+                
             resized_pin = acc_img.resize((pin_size, pin_size), Image.Resampling.LANCZOS)
-            paste_x = int(p_nostril[0] - (resized_pin.width / 2))
-            paste_y = int(p_nostril[1] - (resized_pin.height / 2))
+            paste_x = int(pierce_x - (resized_pin.width / 2.0))
+            paste_y = int(pierce_y - (resized_pin.height / 2.0))
             canvas.alpha_composite(resized_pin, (paste_x, paste_y))
-            landmark_desc = "Left Nostril Ala (Mesh #278)"
+            landmark_desc = f"{nostril_name} (Mesh Precision Placement)"
 
         # ── 7. BAGS (TOTE BAG — HAND-HELD GRIP & HANG) ──────────────────────
         elif any(k in subcat for k in ["bag", "tote", "handbag", "purse"]):
