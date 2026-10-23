@@ -215,6 +215,28 @@ export default function ResultScreen() {
     }
   };
 
+  const handleUndoEverything = () => {
+    Alert.alert(
+      'Undo Everything?',
+      'This will completely delete your model portrait and reset all styling stages (outfit, accessories, makeup, hairstyle). You can then upload a new portrait.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Portrait & Reset',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await session.undoEverything();
+              router.replace('/upload');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not reset session.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView
@@ -569,6 +591,13 @@ export default function ResultScreen() {
               style={styles.actionBtn}
             />
           )}
+          <Button
+            title="Undo Everything (Delete Portrait) 🗑️"
+            variant="outline"
+            size="md"
+            onPress={handleUndoEverything}
+            style={styles.undoEverythingBtn}
+          />
         </View>
       </ScrollView>
 
@@ -1121,6 +1150,12 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     marginBottom: Spacing.xs,
     textAlign: 'center',
+  },
+  undoEverythingBtn: {
+    borderColor: '#EF4444',
+    borderWidth: 1.5,
+    marginTop: Spacing.sm,
+    width: '100%',
   },
   floatingEngineTag: {
     position: 'absolute',

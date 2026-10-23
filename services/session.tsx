@@ -87,6 +87,7 @@ interface StylingSessionValue {
   syncSession: () => Promise<void>;
   removeItem: (item: SessionItem) => Promise<boolean>;
   resetSession: () => void;
+  undoEverything: () => Promise<void>;
   restoreFromServer: () => Promise<void>;
 }
 
@@ -274,6 +275,23 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
     [current, syncSession]
   );
 
+  /**
+   * Undo everything: completely deletes the active uploaded model portrait
+   * and all styling stages on both server and client so the user starts 100% fresh.
+   */
+  const undoEverything = useCallback(async () => {
+    try {
+      await api.upload.resetPortrait();
+    } catch {
+      // Offline / network failure — continue with local wipe
+    }
+    setBase(null);
+    setCurrent(null);
+    setStages({});
+    setItems([]);
+    setSelections({});
+  }, []);
+
   const resetSession = useCallback(() => {
     setBase(null);
     setCurrent(null);
@@ -305,6 +323,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       syncSession,
       removeItem,
       resetSession,
+      undoEverything,
       restoreFromServer,
     }),
     [
@@ -322,6 +341,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       syncSession,
       removeItem,
       resetSession,
+      undoEverything,
       restoreFromServer,
     ]
   );

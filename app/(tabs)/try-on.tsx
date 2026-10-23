@@ -4,7 +4,10 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  TouchableOpacity} from 'react-native';
+  TouchableOpacity,
+  Alert,
+} from 'react-native';
+import { useStylingSession } from '@/services/session';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
@@ -16,7 +19,30 @@ type CategoryKey = 'all' | 'outfit' | 'accessories' | 'makeup' | 'hairstyle';
 
 export default function TryOnHubScreen() {
   const router = useRouter();
+  const session = useStylingSession();
   const [selectedFilter, setSelectedFilter] = useState<CategoryKey>('all');
+
+  const handleUndoEverything = () => {
+    Alert.alert(
+      'Undo Everything?',
+      'This will completely delete your model portrait and reset all styling stages (outfit, accessories, makeup, hairstyle). You can then upload a new portrait.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Portrait & Reset',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await session.undoEverything();
+              router.push('/upload');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not reset session.');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const studios = [
     {
@@ -88,11 +114,24 @@ export default function TryOnHubScreen() {
             <View style={styles.uploadTextWrap}>
               <Text style={styles.uploadTitle}>Your Portrait Photograph</Text>
               <Text style={styles.uploadDesc}>
-                Tap here to upload, preview, or change your photo for virtual try-on.
+                {session.base
+                  ? 'Model portrait loaded ✓. Tap to change or undo below.'
+                  : 'Tap here to upload, preview, or change your photo for virtual try-on.'}
               </Text>
             </View>
-            <Text style={styles.uploadActionText}>Upload ➔</Text>
+            <Text style={styles.uploadActionText}>{session.base ? 'Change ➔' : 'Upload ➔'}</Text>
           </View>
+          {Boolean(session.base) && (
+            <TouchableOpacity
+              style={styles.undoCardBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleUndoEverything();
+              }}
+            >
+              <Text style={styles.undoCardBtnText}>🗑️ Undo Everything (Delete Model Portrait)</Text>
+            </TouchableOpacity>
+          )}
         </Card>
 
         {/* Complete Look Card */}
@@ -209,6 +248,22 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     color: Colors.textMuted,
     marginTop: 4},
+  undoCardBtn: {
+    marginTop: Spacing.sm,
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  undoCardBtnText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: Typography.weights.bold,
+    color: '#EF4444',
+  },
   uploadCard: {
     backgroundColor: Colors.surfaceCard,
     marginBottom: Spacing.xl,

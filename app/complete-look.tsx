@@ -137,18 +137,22 @@ export default function CompleteLookScreen() {
     }
   };
 
-  const handleStartNew = () => {
+  const handleUndoEverything = () => {
     Alert.alert(
-      'Start a New Look?',
-      'This clears the current styling session. Your saved looks remain in your Lookbook.',
+      'Undo Everything?',
+      'This will completely delete your model portrait and reset all styling stages (outfit, accessories, makeup, hairstyle). You can then upload a new portrait.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Start New',
+          text: 'Delete Portrait & Reset',
           style: 'destructive',
-          onPress: () => {
-            session.resetSession();
-            router.push('/upload');
+          onPress: async () => {
+            try {
+              await session.undoEverything();
+              router.replace('/upload');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Could not reset session.');
+            }
           },
         },
       ]
@@ -349,11 +353,11 @@ export default function CompleteLookScreen() {
             style={styles.actionBtn}
           />
           <Button
-            title="Start a New Look"
-            variant="ghost"
+            title="Undo Everything (Delete Portrait) 🗑️"
+            variant="outline"
             size="md"
-            onPress={handleStartNew}
-            style={styles.actionBtn}
+            onPress={handleUndoEverything}
+            style={styles.undoEverythingBtn}
           />
         </View>
       </ScrollView>
@@ -509,6 +513,12 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: Spacing.md,
+  },
+  undoEverythingBtn: {
+    borderColor: '#EF4444',
+    borderWidth: 1.5,
+    marginTop: Spacing.sm,
+    width: '100%',
   },
   actionBtn: {
     alignSelf: 'stretch',

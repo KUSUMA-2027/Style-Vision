@@ -198,6 +198,7 @@ export const api = {
     },
 
     getLatest: () => request<any>('/api/v1/upload/latest'),
+    resetPortrait: () => request<any>('/api/v1/upload/reset', { method: 'DELETE' }),
   },
 
   // --- Style Catalogue ---
