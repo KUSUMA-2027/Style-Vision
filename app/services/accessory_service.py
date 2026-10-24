@@ -102,8 +102,54 @@ def _detect_glasses_geometry(acc_img: Image.Image) -> Tuple[float, float, float]
     return float(w * 0.512), 0.46, 0.50
 
 
+def _extract_earring_pair(acc_img: Image.Image) -> Tuple[Image.Image, Image.Image]:
+    """
+    If the uploaded/catalogue earring image contains a PAIR of earrings side-by-side
+    (e.g., photo showing both left and right earrings), automatically separates them into
+    individual left and right earring assets.
+    If it's already a single earring, returns (single, mirrored_single).
+    """
+    arr = np.array(acc_img)
+    if arr.ndim != 3 or arr.shape[2] != 4:
+        return acc_img, ImageOps.mirror(acc_img)
+
+    alpha = arr[:, :, 3]
+    num, labels, stats, centroids = cv2.connectedComponentsWithStats(alpha)
+
+    # Filter out small noise or watermarks (< 15% of largest component)
+    max_area = max(stats[i, cv2.CC_STAT_AREA] for i in range(1, num)) if num > 1 else 0
+    valid_comps = [
+        i for i in range(1, num)
+        if stats[i, cv2.CC_STAT_AREA] > max_area * 0.15
+        and stats[i, cv2.CC_STAT_HEIGHT] > 20
+    ]
+    valid_comps.sort(key=lambda i: stats[i, cv2.CC_STAT_LEFT])
+
+    if len(valid_comps) >= 2:
+        # User uploaded a pair of earrings!
+        s1 = stats[valid_comps[0]]
+        s2 = stats[valid_comps[1]]
+        left_earring = acc_img.crop((s1[0], s1[1], s1[0] + s1[2], s1[1] + s1[3]))
+        right_earring = acc_img.crop((s2[0], s2[1], s2[0] + s2[2], s2[1] + s2[3]))
+        return _trim_to_alpha_bbox(left_earring), _trim_to_alpha_bbox(right_earring)
+
+    # If aspect ratio is wide (w > h * 0.75), might be a pair that touches slightly: split down the middle
+    w, h = acc_img.size
+    if w > h * 0.75:
+        left_half = acc_img.crop((0, 0, w // 2, h))
+        right_half = acc_img.crop((w // 2, 0, w, h))
+        trimmed_left = _trim_to_alpha_bbox(left_half)
+        trimmed_right = _trim_to_alpha_bbox(right_half)
+        if trimmed_left.width > 10 and trimmed_right.width > 10:
+            return trimmed_left, trimmed_right
+
+    # Single earring: mirror for the other ear
+    single = _trim_to_alpha_bbox(acc_img)
+    return single, ImageOps.mirror(single)
+
+
 def _clean_accessory_background(img: Image.Image) -> Image.Image:
-    """If image is not already transparent RGBA, remove white/solid background."""
+    """If image is not already transparent RGBA, remove white/solid background and discard small noise/watermarks."""
     img_rgba = img.convert("RGBA")
     arr = np.array(img_rgba, dtype=np.float32)
     h, w = arr.shape[:2]
@@ -111,7 +157,16 @@ def _clean_accessory_background(img: Image.Image) -> Image.Image:
     corners = [arr[0, 0, :3], arr[0, w - 1, :3], arr[h - 1, 0, :3], arr[h - 1, w - 1, :3]]
     bg = np.median(corners, axis=0)
     diff = np.sqrt(np.sum((arr[:, :, :3] - bg) ** 2, axis=-1))
-    mask = diff > 28.0
+    mask = diff > 25.0
+
+    # Filter out small disconnected noise / watermarks (less than 8% of dominant object area)
+    num, labels, stats, centroids = cv2.connectedComponentsWithStats(mask.astype(np.uint8))
+    if num > 2:
+        max_area = max(stats[i, cv2.CC_STAT_AREA] for i in range(1, num))
+        for i in range(1, num):
+            if stats[i, cv2.CC_STAT_AREA] < max_area * 0.08:
+                mask[labels == i] = False
+
     arr[:, :, 3] = np.where(mask, 255.0, 0.0)
     # Zero out edge pixels (3px borders and 4px bottom) to prevent any border cropping artifacts
     arr[:3, :, 3] = 0.0
@@ -293,7 +348,7 @@ def synthesize_accessory_tryon(
 
         # ── 2. EARRINGS ──────────────────────────────────────────────────────
         elif "earring" in subcat or subcat == "earrings":
-            # Left earlobe #234, Right earlobe #454
+            # Left earlobe #234 (viewer's left), Right earlobe #454 (viewer's right)
             p_left_ear = pt(234)
             p_right_ear = pt(454)
             p_chin = pt(152)
@@ -302,27 +357,32 @@ def synthesize_accessory_tryon(
             face_h = math.hypot(p_chin[0] - p_forehead[0], p_chin[1] - p_forehead[1])
             face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
             scale_factor = override_scale if override_scale else 1.0
-            earring_h = int(face_h * 0.32 * scale_factor)
-            earring_w = int(earring_h * (acc_img.width / acc_img.height))
             
-            resized_earring = acc_img.resize((max(8, earring_w), max(8, earring_h)), Image.Resampling.LANCZOS)
+            # Automatically detect and separate if image contains a pair of earrings side-by-side
+            left_ear_asset, right_ear_asset = _extract_earring_pair(acc_img)
+            
+            earring_h = int(face_h * 0.32 * scale_factor)
+            earring_w_l = max(8, int(earring_h * (left_ear_asset.width / left_ear_asset.height)))
+            earring_w_r = max(8, int(earring_h * (right_ear_asset.width / right_ear_asset.height)))
+            
+            resized_l = left_ear_asset.resize((earring_w_l, earring_h), Image.Resampling.LANCZOS)
+            resized_r = right_ear_asset.resize((earring_w_r, earring_h), Image.Resampling.LANCZOS)
             
             # Hook anchors precisely at the bottom of the earlobe (1.5% face_h below earlobe landmark)
             left_ear_y = int(p_left_ear[1] + (face_h * 0.015))
             right_ear_y = int(p_right_ear[1] + (face_h * 0.015))
             
-            # Left Earring
-            lx = int(p_left_ear[0] - (earring_w * 0.5))
+            # Left Earring (viewer's left ear #234)
+            lx = int(p_left_ear[0] - (earring_w_l * 0.5))
             ly = int(left_ear_y)
-            canvas.alpha_composite(resized_earring, (lx, ly))
+            canvas.alpha_composite(resized_l, (lx, ly))
             
-            # Right Earring (Mirrored for natural 3D symmetry)
-            right_earring = ImageOps.mirror(resized_earring)
-            rx = int(p_right_ear[0] - (right_earring.width * 0.5))
+            # Right Earring (viewer's right ear #454)
+            rx = int(p_right_ear[0] - (earring_w_r * 0.5))
             ry = int(right_ear_y)
-            canvas.alpha_composite(right_earring, (rx, ry))
+            canvas.alpha_composite(resized_r, (rx, ry))
             
-            landmark_desc = "Earlobes (Mesh #234 & #454)"
+            landmark_desc = "Earlobes (Individual Earring Anchor #234 & #454)"
 
         # ── 3. NECKLACE ──────────────────────────────────────────────────────
         elif "necklace" in subcat:

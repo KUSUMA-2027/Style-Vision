@@ -227,6 +227,7 @@ async def reset_user_portrait_and_session(current_user: dict = Depends(get_curre
     await db["images"].delete_many({"user_id": user_id})
 
     # 3. Clean active try-on jobs (keep saved looks in 'looks' collection safe in lookbook)
+    await db["tryons"].delete_many({"user_id": user_id})
     await db["tryon_jobs"].delete_many({"user_id": user_id})
 
     return {"status": "ok", "message": "All portrait and session data deleted successfully."}
