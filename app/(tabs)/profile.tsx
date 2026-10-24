@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import Constants from 'expo-constants';
-import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
+import { Colors, Spacing, Typography } from '@/constants/theme';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';

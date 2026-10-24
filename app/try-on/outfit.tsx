@@ -106,7 +106,7 @@ export default function OutfitTryOnScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     loadData();

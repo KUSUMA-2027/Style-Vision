@@ -8,7 +8,7 @@ import {
   RefreshControl} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
+
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from '@/constants/theme';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';

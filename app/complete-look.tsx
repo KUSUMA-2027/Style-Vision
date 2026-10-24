@@ -140,7 +140,7 @@ export default function CompleteLookScreen() {
   const handleUndoEverything = () => {
     Alert.alert(
       'Undo Everything?',
-      'This will completely delete your model portrait and reset all styling stages (outfit, accessories, makeup, hairstyle). You can then upload a new portrait.',
+      'This will completely delete your model portrait and reset active styling. Your uploaded accessories, dresses, and saved lookbook styles will remain safe. You will be redirected to the home page.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -149,7 +149,7 @@ export default function CompleteLookScreen() {
           onPress: async () => {
             try {
               await session.undoEverything();
-              router.replace('/upload');
+              router.replace('/(tabs)');
             } catch (err: any) {
               Alert.alert('Error', err.message || 'Could not reset session.');
             }

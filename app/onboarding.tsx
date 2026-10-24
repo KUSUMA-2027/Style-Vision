@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Colors, Spacing, BorderRadius, Typography, Shadows } from '@/constants/theme';
+import { Colors, Spacing, Typography, Shadows } from '@/constants/theme';
 import { Button } from '@/components/ui/Button';
 
 export default function OnboardingScreen() {

@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+
 
 type CategoryKey = 'all' | 'outfit' | 'accessories' | 'makeup' | 'hairstyle';
 
@@ -25,7 +25,7 @@ export default function TryOnHubScreen() {
   const handleUndoEverything = () => {
     Alert.alert(
       'Undo Everything?',
-      'This will completely delete your model portrait and reset all styling stages (outfit, accessories, makeup, hairstyle). You can then upload a new portrait.',
+      'This will completely delete your model portrait and reset active styling. Your uploaded accessories, dresses, and saved lookbook styles will remain safe. You will be redirected to the home page.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -34,7 +34,7 @@ export default function TryOnHubScreen() {
           onPress: async () => {
             try {
               await session.undoEverything();
-              router.push('/upload');
+              router.replace('/(tabs)');
             } catch (err: any) {
               Alert.alert('Error', err.message || 'Could not reset session.');
             }

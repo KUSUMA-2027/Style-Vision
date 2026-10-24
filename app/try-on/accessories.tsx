@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ErrorMessage } from '@/components/ui/ErrorMessage';
 import { api, getApiBaseUrl } from '@/services/api';
-import { useStylingSession, STAGE_LABEL } from '@/services/session';
+import { useStylingSession } from '@/services/session';
 
 type SubCatFilter = 'all' | 'glasses' | 'earrings' | 'necklace' | 'nose_pin' | 'bags';
 
@@ -64,7 +64,7 @@ export default function AccessoriesScreen() {
   // Manual accessory upload modal states
   const [showAddModal, setShowAddModal] = useState(false);
   const [newAccName, setNewAccName] = useState('');
-  const [newAccCategory, setNewAccCategory] = useState<'glasses' | 'earrings' | 'necklace' | 'nose_pin'>('glasses');
+  const [newAccCategory, setNewAccCategory] = useState<'glasses' | 'earrings' | 'necklace' | 'nose_pin' | 'bags'>('glasses');
   const [uploadingAcc, setUploadingAcc] = useState(false);
 
   const baseUrl = getApiBaseUrl();
@@ -269,7 +269,7 @@ export default function AccessoriesScreen() {
           <View style={styles.addAccTextWrap}>
             <Text style={styles.addAccTitle}>+ Photograph Your Own Accessory</Text>
             <Text style={styles.addAccDesc}>
-              Upload a photo of your sunglasses, earrings, necklace, or nose pin
+              Upload a photo of your sunglasses, earrings, necklace, nose pin, or tote bag
             </Text>
           </View>
           <Text style={styles.addAccChevron}>→</Text>
@@ -386,7 +386,7 @@ export default function AccessoriesScreen() {
           <Card style={styles.modalCard} variant="elevated">
             <Text style={styles.modalTitle}>Upload My Own Accessory 💎</Text>
             <Text style={styles.modalSubtitle}>
-              Photograph sunglasses, earrings, a necklace, or a nose pin to try on.
+              Photograph sunglasses, earrings, a necklace, a nose pin, or a handbag/tote bag to try on.
             </Text>
 
             <Text style={styles.inputLabel}>Accessory Name</Text>
@@ -406,6 +406,7 @@ export default function AccessoriesScreen() {
                   { key: 'earrings', label: '✨ Earrings' },
                   { key: 'necklace', label: '📿 Necklace' },
                   { key: 'nose_pin', label: '🌟 Nose Pin' },
+                  { key: 'bags', label: '👜 Tote Bag' },
                 ] as const
               ).map((cat) => {
                 const active = newAccCategory === cat.key;
