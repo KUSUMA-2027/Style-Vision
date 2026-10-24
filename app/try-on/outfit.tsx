@@ -225,7 +225,7 @@ export default function OutfitTryOnScreen() {
   const sourceImage = session.current ??
     (latestPortrait ? { image_id: latestPortrait.image_id, url: latestPortrait.url } : null);
   const appliedStageCount = Object.keys(session.stages).length;
-  const isChainedSource = Boolean(session.current && session.stages.outfit?.resultImageId !== session.current.image_id);
+  const isChainedSource = Boolean(session.current && session.base && session.current.image_id !== session.base.image_id);
 
   const handleTryOn = async () => {
     if (!selectedId) {
@@ -279,7 +279,7 @@ export default function OutfitTryOnScreen() {
         return;
       }
 
-      session.setSelection('outfit', { itemId: selectedId, name: chosenGarment?.name });
+      session.setSelection('outfit', { itemId: selectedId, name: chosenGarment?.name, slot: clothType });
       session.applyStageResult({
         stage: 'outfit',
         tryonId: res.tryon_id,
@@ -288,6 +288,7 @@ export default function OutfitTryOnScreen() {
         sourceUrl: res.original_image_url ?? sourceImage.url,
         title: chosenGarment?.name ?? 'Virtual Outfit Try-On',
         style: `${sourceTab === 'wardrobe' ? 'My Wardrobe' : 'Store Collection'} • ${chosenGarment?.category ?? 'Garment'}`,
+        slot: clothType,
         mode: res.mode,
         appliedAt: Date.now(),
       });
@@ -301,6 +302,7 @@ export default function OutfitTryOnScreen() {
           itemId: selectedId,
           tryonId: res.tryon_id,
           mode: res.mode,
+          slot: clothType,
           resultUrl: res.result_image_url ?? '',
           originalUrl: res.original_image_url ?? ''}});
     } catch (err: any) {
@@ -352,7 +354,7 @@ export default function OutfitTryOnScreen() {
                 </View>
                 <Text style={styles.photoDesc}>
                   {isChainedSource
-                    ? 'The new outfit will replace the clothing on your latest styled look.'
+                    ? 'Styles directly onto your current model look (tops & bottoms can be paired together).'
                     : 'Tap to change or take a new portrait'}
                 </Text>
               </View>

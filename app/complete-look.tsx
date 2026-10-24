@@ -14,9 +14,10 @@ import {
   Alert,
   Image,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
 import { Header } from '@/components/ui/Header';
 import { Card } from '@/components/ui/Card';
@@ -45,17 +46,20 @@ export default function CompleteLookScreen() {
   const router = useRouter();
   const session = useStylingSession();
   const baseUrl = getApiBaseUrl();
+  const params = useLocalSearchParams<{ resultUrl?: string }>();
 
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [zoomModalVisible, setZoomModalVisible] = useState(false);
 
   const appliedStages = STAGE_ORDER.filter((s) => session.stages[s]);
-  const hasLook = Boolean(session.current && appliedStages.length > 0);
-  const finalImageUrl = session.current?.url
-    ? session.current.url.startsWith('http')
-      ? session.current.url
-      : `${baseUrl}${session.current.url}`
+  const hasLook = Boolean((session.current || params.resultUrl) && (appliedStages.length > 0 || params.resultUrl));
+  const rawUrl = session.current?.url || params.resultUrl;
+  const finalImageUrl = rawUrl
+    ? rawUrl.startsWith('http')
+      ? rawUrl
+      : `${baseUrl}${rawUrl}`
     : null;
 
   const resolvedTryonId =
@@ -162,7 +166,9 @@ export default function CompleteLookScreen() {
   if (!session.base && !hasLook) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <Header title="Complete Look" showBack />
+
+  
+        <Header title="Full Body Look" showBack />
         <EmptyState
           icon="✨"
           title="No Styling Session Yet"
@@ -176,14 +182,16 @@ export default function CompleteLookScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
+
+      <Header title="Full Body Look" showBack />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <Badge label="Final Reveal" variant="primary" style={styles.badge} />
-          <Text style={styles.title}>Your Complete Look</Text>
+          <Badge label="Full Body Look Reveal" variant="primary" style={styles.badge} />
+          <Text style={styles.title}>Your Full Body Look</Text>
           <Text style={styles.subtitle}>
             {appliedStages.length === 0
               ? 'No stages applied yet — start with an outfit.'
@@ -194,7 +202,16 @@ export default function CompleteLookScreen() {
         {/* Combined result preview */}
         <Card style={styles.previewCard} variant="elevated">
           {finalImageUrl ? (
-            <Image source={{ uri: finalImageUrl }} style={styles.previewImage} resizeMode="cover" />
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => setZoomModalVisible(true)}
+              style={styles.previewImageTouch}
+            >
+              <Image source={{ uri: finalImageUrl }} style={styles.previewImage} resizeMode="contain" />
+              <View style={styles.zoomHintOverlay}>
+                <Text style={styles.zoomHintText}>🔍 Tap to View Full Screen</Text>
+              </View>
+            </TouchableOpacity>
           ) : (
             <View style={styles.previewPlaceholder}>
               <Text style={styles.previewPlaceholderIcon}>🪞</Text>
@@ -242,7 +259,11 @@ export default function CompleteLookScreen() {
                     })()}
                   </View>
                   <Text style={styles.stageDetail} numberOfLines={1}>
-                    {done ? result!.title : 'Tap to style — any order you like'}
+                    {done
+                      ? stage === 'outfit' && session.items.filter((i) => i.stage === 'outfit').length > 1
+                        ? session.items.filter((i) => i.stage === 'outfit').map((i) => i.title).join(' + ')
+                        : result!.title
+                      : 'Tap to style — any order you like'}
                   </Text>
                 </View>
                 <Badge
@@ -361,6 +382,32 @@ export default function CompleteLookScreen() {
           />
         </View>
       </ScrollView>
+
+      {/* Full-screen Zoom Modal */}
+      <Modal visible={zoomModalVisible} transparent animationType="fade">
+        <View style={styles.zoomModalOverlay}>
+          <SafeAreaView style={styles.zoomModalSafe}>
+            <View style={styles.zoomModalHeader}>
+              <Text style={styles.zoomModalTitle}>Full Body Look — High Resolution</Text>
+              <TouchableOpacity
+                style={styles.zoomCloseBtn}
+                onPress={() => setZoomModalVisible(false)}
+              >
+                <Text style={styles.zoomCloseText}>✕ Close</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.zoomImageContainer}>
+              {finalImageUrl ? (
+                <Image
+                  source={{ uri: finalImageUrl }}
+                  style={styles.zoomModalImage}
+                  resizeMode="contain"
+                />
+              ) : null}
+            </View>
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -403,7 +450,7 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: '100%',
-    height: 420,
+    height: 460,
     borderRadius: BorderRadius.lg,
     backgroundColor: Colors.surface,
   },
@@ -529,5 +576,67 @@ const styles = StyleSheet.create({
   },
   halfBtn: {
     flex: 1,
+  },
+  previewImageTouch: {
+    position: 'relative',
+    width: '100%',
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+  },
+  zoomHintOverlay: {
+    position: 'absolute',
+    bottom: Spacing.sm,
+    right: Spacing.sm,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  zoomHintText: {
+    fontSize: Typography.sizes.xs,
+    color: '#fff',
+    fontWeight: Typography.weights.bold,
+  },
+  zoomModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+  },
+  zoomModalSafe: {
+    flex: 1,
+  },
+  zoomModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  zoomModalTitle: {
+    fontSize: Typography.sizes.md,
+    fontWeight: Typography.weights.bold,
+    color: '#fff',
+  },
+  zoomCloseBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  zoomCloseText: {
+    color: '#fff',
+    fontWeight: Typography.weights.bold,
+    fontSize: Typography.sizes.xs,
+  },
+  zoomImageContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+  },
+  zoomModalImage: {
+    width: '100%',
+    height: '100%',
   },
 });

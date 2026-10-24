@@ -138,6 +138,10 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
         appliedAt: Date.now(),
       };
     }
+    const outfitItems = serverItems.filter((i) => i.stage === 'outfit');
+    if (outfitItems.length > 1 && builtStages.outfit) {
+      builtStages.outfit.title = outfitItems.map((i) => i.title).join(' + ');
+    }
     if (data?.stages) {
       for (const [stg, info] of Object.entries(data.stages)) {
         if (info && builtStages[stg as Stage]) {
@@ -230,9 +234,21 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
     }
     setItems((prev) => [
       ...prev.filter((it) => {
-        // Single-item stages: outfit and hairstyle are singular
-        if (result.stage === 'outfit' || result.stage === 'hairstyle') {
-          return it.stage !== result.stage;
+        // Hairstyle is singular
+        if (result.stage === 'hairstyle') {
+          return it.stage !== 'hairstyle';
+        }
+        // Outfit: upper top and lower bottom can co-exist; overall replaces both
+        if (result.stage === 'outfit' && it.stage === 'outfit') {
+          const newSlot = result.slot || 'overall';
+          const oldSlot = it.slot || 'overall';
+          if (newSlot === 'upper') {
+            return oldSlot !== 'upper' && oldSlot !== 'overall';
+          }
+          if (newSlot === 'lower') {
+            return oldSlot !== 'lower' && oldSlot !== 'overall';
+          }
+          return false; // overall replaces both
         }
         // Slotted stages: replace only if the slot matches
         if (it.stage === result.stage && result.slot && it.slot === result.slot) {

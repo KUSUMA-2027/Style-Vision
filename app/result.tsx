@@ -39,6 +39,7 @@ export default function ResultScreen() {
     itemId?: string;
     tryonId?: string;
     mode?: string;
+    slot?: string;
   }>();
 
   const [viewMode, setViewMode] = useState<'split' | 'before' | 'after'>('split');
@@ -498,6 +499,33 @@ export default function ResultScreen() {
           )}
         </Card>
 
+        {/* Quick View Full Look Button — Placed right after the Before & After Viewer */}
+        <TouchableOpacity
+          style={styles.viewFullLookBanner}
+          onPress={() =>
+            router.push({
+              pathname: '/complete-look',
+              params: { resultUrl: fullResultUrl || '' },
+            } as any)
+          }
+          activeOpacity={0.85}
+        >
+          <View style={styles.viewFullLookBannerLeft}>
+            <View style={styles.viewFullLookIconWrap}>
+              <Text style={styles.viewFullLookEmoji}>🪞</Text>
+            </View>
+            <View style={styles.viewFullLookTextWrap}>
+              <Text style={styles.viewFullLookTitle}>View Full Body Look</Text>
+              <Text style={styles.viewFullLookSubtitle}>
+                See your full styled avatar with all applied garments & details
+              </Text>
+            </View>
+          </View>
+          <View style={styles.viewFullLookArrowBadge}>
+            <Text style={styles.viewFullLookArrowText}>Full Look ➔</Text>
+          </View>
+        </TouchableOpacity>
+
         {/* Technical Inference Metrics */}
         <Card style={styles.metricsCard} variant="outlined">
           <Text style={styles.metricsHeading}>📊 AI Processing Breakdown</Text>
@@ -540,12 +568,35 @@ export default function ResultScreen() {
         {/* Action Buttons */}
         <View style={styles.actions}>
           <Button
-            title={continueLabel + ' →'}
+            title="View Full Look 🪞"
             variant="primary"
             size="lg"
-            onPress={() => router.push(continueRoute as any)}
+            onPress={() =>
+              router.push({
+                pathname: '/complete-look',
+                params: { resultUrl: fullResultUrl || '' },
+              } as any)
+            }
             style={styles.actionBtn}
           />
+          {lookCategory === 'outfit' && (
+            <Button
+              title={params.slot === 'upper' ? 'Pair with Pants / Bottoms 👖' : 'Pair with Top / Jacket 🧥'}
+              variant="outline"
+              size="lg"
+              onPress={() => router.push('/try-on/outfit')}
+              style={styles.actionBtn}
+            />
+          )}
+          {nextStage && (
+            <Button
+              title={continueLabel + ' →'}
+              variant="outline"
+              size="lg"
+              onPress={() => router.push(continueRoute as any)}
+              style={styles.actionBtn}
+            />
+          )}
           <Button
             title="Try Once Again 🔄"
             variant="outline"
@@ -1224,5 +1275,59 @@ const styles = StyleSheet.create({
     flex: 1,
     flexShrink: 1,
     flexWrap: 'wrap',
+  },
+  viewFullLookBanner: {
+    backgroundColor: Colors.surfaceCard,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: Colors.accentGold,
+    padding: Spacing.md,
+    marginTop: Spacing.md,
+    marginBottom: Spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  viewFullLookBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  viewFullLookIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(212, 175, 55, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  viewFullLookEmoji: {
+    fontSize: 22,
+  },
+  viewFullLookTextWrap: {
+    flex: 1,
+  },
+  viewFullLookTitle: {
+    fontSize: Typography.sizes.md,
+    fontWeight: Typography.weights.bold,
+    color: Colors.textPrimary,
+    marginBottom: 2,
+  },
+  viewFullLookSubtitle: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textMuted,
+  },
+  viewFullLookArrowBadge: {
+    backgroundColor: Colors.accentGold,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    marginLeft: Spacing.sm,
+  },
+  viewFullLookArrowText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: Typography.weights.bold,
+    color: '#000000',
   },
 });
