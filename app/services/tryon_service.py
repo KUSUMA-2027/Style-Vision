@@ -807,6 +807,7 @@ async def synthesize_outfit_tryon(
                 target_h = int(target_w * aspect)
                 paste_x = int(hip_center[0] - target_w / 2)
                 paste_y = int(hip_center[1] - 40)
+                paste_x = max(0, min(pw - max(10, target_w), paste_x))
             else:
                 # Upper top / jacket / blazer or Overall gown / dress / kurti
                 sh_row_pct = 0.12 if cloth_type == "overall" else 0.15
@@ -878,17 +879,8 @@ async def synthesize_outfit_tryon(
             overlay.paste(resized_garment, (paste_x, paste_y))
             composite = Image.alpha_composite(person_img.convert("RGBA"), overlay)
 
-    # Step 5: Verification Banner (AI Integrity Rule)
-    draw = ImageDraw.Draw(composite)
-    banner_h = 36
-    draw.rectangle([0, ph - banner_h, pw, ph], fill=(13, 8, 24, 215))
-
-    mode_label = (
-        "StyleVision AI · CatVTON Neural Diffusion (Cloud GPU)"
-        if mode == TryOnMode.catvton
-        else "StyleVision AI · Prototype Overlay Mode (CPU)"
-    )
-    draw.text((16, ph - 26), mode_label, fill=(180, 160, 230, 255))
+    # Step 5: Verification Banner (UI displays GPU/Local badge above image per user requirement)
+    # Mode attribution is tracked in metadata, leaving the full body and shoes 100% unclipped
 
     # Step 6: Save composite image + register for chaining (skipped in replay mode)
     if not register_result:

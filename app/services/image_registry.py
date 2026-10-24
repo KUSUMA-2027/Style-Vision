@@ -324,12 +324,14 @@ def _item_title_from_doc(doc: dict) -> str:
 
 
 def _slot_of_doc(stage: str, doc: dict) -> Optional[str]:
-    """The replaceable slot value of a stage-result document (e.g. accessory subcategory)."""
+    """The replaceable slot value of a stage-result document (e.g. accessory subcategory, outfit cloth_type)."""
     meta = doc.get("metadata") or {}
     if stage == "accessories":
         return meta.get("subcategory")
     if stage == "makeup":
         return meta.get("makeup_type")
+    if stage == "outfit":
+        return meta.get("cloth_type") or "overall"
     return None
 
 
@@ -371,6 +373,16 @@ async def resolve_stage_replay(
             return True
         if slot_value is None:
             return True
+        if stage == "outfit":
+            doc_cloth_type = _slot_of_doc("outfit", doc) or "overall"
+            if slot_value == "upper":
+                # Replacing upper replaces previous upper or overall, but PRESERVES lower!
+                return doc_cloth_type in ("upper", "overall")
+            elif slot_value == "lower":
+                # Replacing lower replaces previous lower or overall, but PRESERVES upper!
+                return doc_cloth_type in ("lower", "overall")
+            else:  # "overall" replaces both
+                return True
         return _slot_of_doc(stage, doc) == slot_value
 
     first_drop_idx = next((i for i, d in enumerate(chain) if _is_dropped(d)), None)

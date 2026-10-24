@@ -348,69 +348,91 @@ def synthesize_accessory_tryon(
 
         # ── 2. EARRINGS ──────────────────────────────────────────────────────
         elif "earring" in subcat or subcat == "earrings":
-            # Left earlobe #234 (viewer's left), Right earlobe #454 (viewer's right)
-            p_left_ear = pt(234)
-            p_right_ear = pt(454)
+            # Dynamic cranial head scan for realistic earring sizing & anatomical positioning
+            p_left_ear = pt(234)   # MediaPipe image-left tragus / outer cheek junction
+            p_right_ear = pt(454)  # MediaPipe image-right tragus / outer cheek junction
+            p_jaw_l = pt(132)      # Left gonion / lower jaw angle
+            p_jaw_r = pt(361)      # Right gonion / lower jaw angle
             p_chin = pt(152)
             p_forehead = pt(10)
-            
+
             face_h = math.hypot(p_chin[0] - p_forehead[0], p_chin[1] - p_forehead[1])
             face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
+            head_h = face_h * 1.25
+            head_w = face_w * 1.15
+
             scale_factor = override_scale if override_scale else 1.0
-            
-            # Automatically detect and separate if image contains a pair of earrings side-by-side
+
+            # Automatically extract individual left & right earring assets
             left_ear_asset, right_ear_asset = _extract_earring_pair(acc_img)
-            
-            earring_h = int(face_h * 0.32 * scale_factor)
-            earring_w_l = max(8, int(earring_h * (left_ear_asset.width / left_ear_asset.height)))
-            earring_w_r = max(8, int(earring_h * (right_ear_asset.width / right_ear_asset.height)))
-            
+
+            # Determine earring category / aspect ratio for natural scale
+            aspect_l = left_ear_asset.height / max(1, left_ear_asset.width)
+            if aspect_l > 1.6:
+                # Long dangle / chandelier earring
+                earring_h = int(head_h * 0.18 * scale_factor)
+            else:
+                # Stud, hoop, or button earring
+                earring_h = int(head_h * 0.11 * scale_factor)
+
+            earring_w_l = max(6, int(earring_h * (left_ear_asset.width / left_ear_asset.height)))
+            earring_w_r = max(6, int(earring_h * (right_ear_asset.width / right_ear_asset.height)))
+
             resized_l = left_ear_asset.resize((earring_w_l, earring_h), Image.Resampling.LANCZOS)
             resized_r = right_ear_asset.resize((earring_w_r, earring_h), Image.Resampling.LANCZOS)
-            
-            # Hook anchors precisely at the bottom of the earlobe (1.5% face_h below earlobe landmark)
-            left_ear_y = int(p_left_ear[1] + (face_h * 0.015))
-            right_ear_y = int(p_right_ear[1] + (face_h * 0.015))
-            
-            # Left Earring (viewer's left ear #234)
-            lx = int(p_left_ear[0] - (earring_w_l * 0.5))
-            ly = int(left_ear_y)
+
+            # Anatomical earlobe level sits ~30% down from tragus towards jaw angle
+            lobe_y_l = float(p_left_ear[1] + (p_jaw_l[1] - p_left_ear[1]) * 0.30)
+            lobe_y_r = float(p_right_ear[1] + (p_jaw_r[1] - p_right_ear[1]) * 0.30)
+
+            # Direct earlobe attachment anchor hanging outside cheek boundary:
+            lx = int(p_left_ear[0] - (earring_w_l * 0.85))
+            ly = int(lobe_y_l)
+            rx = int(p_right_ear[0] - (earring_w_r * 0.15))
+            ry = int(lobe_y_r)
+
+            if override_x is not None:
+                lx = int(override_x * pw - earring_w_l * 0.5)
+                rx = int(override_x * pw - earring_w_r * 0.5)
+            if override_y is not None:
+                ly = int(override_y * ph)
+                ry = int(override_y * ph)
+            if override_x is None and offset_x is not None:
+                lx += int(offset_x)
+                rx += int(offset_x)
+            if override_y is None and offset_y is not None:
+                ly += int(offset_y)
+                ry += int(offset_y)
+
+            # Left Earring (viewer's left)
             canvas.alpha_composite(resized_l, (lx, ly))
-            
-            # Right Earring (viewer's right ear #454)
-            rx = int(p_right_ear[0] - (earring_w_r * 0.5))
-            ry = int(right_ear_y)
+
+            # Right Earring (viewer's right)
             canvas.alpha_composite(resized_r, (rx, ry))
-            
-            landmark_desc = "Earlobes (Individual Earring Anchor #234 & #454)"
+
+            landmark_desc = f"Anatomical Head & Earlobe Fit (Head {head_w:.0f}x{head_h:.0f}px)"
 
         # ── 3. NECKLACE ──────────────────────────────────────────────────────
         elif "necklace" in subcat:
-            # Anchor at the throat contour right below chin, embracing the neck with NO extra gap
+            # Scan model neck dimensions and jawline contours
             p_chin = pt(152)
             p_forehead = pt(10)
+            p_jaw_l = pt(132)  # Left gonion / lower jaw angle
+            p_jaw_r = pt(361)  # Right gonion / lower jaw angle
             p_left_ear = pt(234)
             p_right_ear = pt(454)
-            
+
             face_h = math.hypot(p_chin[0] - p_forehead[0], p_chin[1] - p_forehead[1])
             face_w = math.hypot(p_right_ear[0] - p_left_ear[0], p_right_ear[1] - p_left_ear[1])
-            
-            # Scan neck and shoulder width
+            jaw_w = math.hypot(p_jaw_r[0] - p_jaw_l[0], p_jaw_r[1] - p_jaw_l[1])
+
             scale_factor = override_scale if override_scale else 1.0
-            sh_span = pose.get("shoulder_span") if (pose and pose.get("has_pose")) else int(face_w * 2.8)
-            shoulder_center = pose.get("shoulder_center") if (pose and pose.get("has_pose")) else None
-            
-            # Natural necklace width: spans across the clavicles / inner collarbones
-            target_w = int(min(face_w * 1.18, sh_span * 0.50) * scale_factor)
-            target_h = int(target_w * (acc_img.height / acc_img.width))
-            
-            resized_neck = acc_img.resize((max(20, target_w), max(20, target_h)), Image.Resampling.LANCZOS)
-            
-            # Angle following the head and neck tilt
+
+            # Neck alignment angle (head tilt + shoulder slant)
             dx = p_right_ear[0] - p_left_ear[0]
             dy = p_right_ear[1] - p_left_ear[1]
             angle_deg = -math.degrees(math.atan2(dy, dx))
-            
+
             if pose and pose.get("has_pose"):
                 p_ls = pose.get("left_shoulder")
                 p_rs = pose.get("right_shoulder")
@@ -418,33 +440,65 @@ def synthesize_accessory_tryon(
                     dx_sh = p_ls[0] - p_rs[0]
                     dy_sh = p_ls[1] - p_rs[1]
                     angle_sh = -math.degrees(math.atan2(dy_sh, dx_sh))
-                    # Natural gravitational hang blending head tilt and torso orientation
-                    angle_deg = 0.65 * angle_deg + 0.35 * angle_sh
-                    
-            rotated_neck = resized_neck.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
-            
-            # X center follows the midline of the neck between chin and sternum
-            cx = p_chin[0]
-            if shoulder_center is not None:
-                cx = float(p_chin[0] * 0.40 + shoulder_center[0] * 0.60)
-                
-            # Y position: top of the chain begins right at the throat contour below chin (3.5% of face height)
-            # This completely eliminates any floating gap between the chin/neck and the necklace!
-            neck_top_y = p_chin[1] + (face_h * 0.035)
-            
+                    angle_deg = 0.60 * angle_deg + 0.40 * angle_sh
+
+            # Center X along neck midline
+            cx = float(p_chin[0])
+
+            # Measure the throat hollow (inner concave curve) of the raw necklace to classify geometry:
+            raw_arr = np.array(acc_img)
+            raw_mid_x = raw_arr.shape[1] // 2
+            raw_strip = raw_arr[:, max(0, raw_mid_x - 15) : min(raw_arr.shape[1], raw_mid_x + 15), 3]
+            raw_ys = np.where(raw_strip > 20)[0]
+            throat_hollow_pct = (raw_ys.min() / raw_arr.shape[0]) if len(raw_ys) > 0 else 0.50
+
+            if throat_hollow_pct > 0.60:
+                # ── Pendant / Drop / Chain Necklace (e.g. gold_necklace.png) ──
+                # Top tips drape over clavicles; width spans upper chest
+                target_w = int(jaw_w * 1.18 * scale_factor)
+                target_h = int(target_w * (acc_img.height / max(1, acc_img.width)))
+                resized_neck = acc_img.resize((max(20, target_w), max(20, target_h)), Image.Resampling.LANCZOS)
+                rotated_neck = resized_neck.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
+
+                # Soft fade on top 12% to blend chain ends seamlessly into neck/shoulder
+                r_arr = np.array(rotated_neck)
+                fade_h = max(5, int(r_arr.shape[0] * 0.12))
+                for row_i in range(min(fade_h, r_arr.shape[0])):
+                    fade_mult = row_i / float(fade_h)
+                    r_arr[row_i, :, 3] = (r_arr[row_i, :, 3].astype(float) * fade_mult).astype(np.uint8)
+                rotated_neck = Image.fromarray(r_arr)
+
+                paste_x = int(cx - (rotated_neck.width / 2.0))
+                paste_y = int(p_chin[1] + (face_h * 0.17))
+            else:
+                # ── Choker / Collar Necklace ──
+                # Hugs the upper neck, tips at lower jaw angle
+                target_w = int(jaw_w * 1.02 * scale_factor)
+                target_w = max(int(jaw_w * 0.85), min(target_w, int(jaw_w * 1.18)))
+                target_h = int(target_w * (acc_img.height / max(1, acc_img.width)))
+                resized_neck = acc_img.resize((max(20, target_w), max(20, target_h)), Image.Resampling.LANCZOS)
+                rotated_neck = resized_neck.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
+
+                r_arr = np.array(rotated_neck)
+                r_mid_x = r_arr.shape[1] // 2
+                r_strip = r_arr[:, max(0, r_mid_x - 15) : min(r_arr.shape[1], r_mid_x + 15), 3]
+                r_ys = np.where(r_strip > 20)[0]
+                throat_y_in_neck = int(r_ys.min()) if len(r_ys) > 0 else int(rotated_neck.height * 0.45)
+                target_throat_y = p_chin[1] + (face_h * 0.20)
+                paste_y = int(target_throat_y - throat_y_in_neck)
+                paste_x = int(cx - (rotated_neck.width / 2.0))
+
             if override_x is not None:
-                cx = override_x * pw
+                paste_x = int(override_x * pw - (rotated_neck.width / 2.0))
             if override_y is not None:
-                neck_top_y = override_y * ph
+                paste_y = int(override_y * ph)
             if override_x is None and offset_x is not None:
-                cx += offset_x
+                paste_x += int(offset_x)
             if override_y is None and offset_y is not None:
-                neck_top_y += offset_y
-                
-            paste_x = int(cx - (rotated_neck.width / 2.0))
-            paste_y = int(neck_top_y)
+                paste_y += int(offset_y)
+
             canvas.alpha_composite(rotated_neck, (paste_x, paste_y))
-            landmark_desc = f"Anatomical Neck & Clavicle Fit (Zero-Gap, angle {angle_deg:.1f} deg)"
+            landmark_desc = f"Anatomical Neck Scan Fit (Neck {target_w}px, angle {angle_deg:.1f} deg)"
 
         # ── 4. NOSE PIN ──────────────────────────────────────────────────────
         elif "nose" in subcat:

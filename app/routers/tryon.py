@@ -155,7 +155,19 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
     except Exception as exc:
         logger.warning("[Outfit] DB lookup skipped: %s", exc)
 
-    # Replacement-aware source resolution (one outfit at a time)
+    # Classify garment piece ('upper', 'lower', or 'overall')
+    from app.services.tryon_service import _determine_cloth_type
+    cloth_type = _determine_cloth_type(
+        garment_category=garment_category,
+        garment_name=garment_name,
+        garment_id=garment_id,
+        explicit_cloth_type=request.cloth_type,
+    )
+
+    # Replacement-aware source resolution:
+    # 'upper' top only replaces previous 'upper' (PRESERVES lower pants!)
+    # 'lower' bottom only replaces previous 'lower' (PRESERVES upper top!)
+    # 'overall' replaces both
     person_img = None
     source_url: Optional[str] = None
     source_doc_id: Optional[str] = None
@@ -163,7 +175,12 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
     dropped = False
     try:
         source_doc, replay_docs, dropped = await resolve_stage_replay(
-            user_id, request.person_image_id, stage="outfit", replace_all=True,
+            user_id,
+            request.person_image_id,
+            stage="outfit",
+            replace_all=False,
+            slot_key="cloth_type",
+            slot_value=cloth_type,
         )
         if source_doc is not None:
             person_img, source_url = load_image_from_doc(source_doc)
@@ -172,14 +189,14 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
         logger.warning("[Outfit] replay resolution failed: %s", exc)
 
     if dropped and person_img is not None:
-        # Rebuild: new outfit first, then replay preserved stages on top.
+        # Rebuild: new outfit piece first, then replay preserved stages on top (including opposite garment piece!).
         # Every rebuilt layer is registered as its own chain doc so removals
         # and future replacements keep working.
         tryon_id = f"tryon-outfit-{uuid.uuid4().hex[:10]}"
         ops = [{"stage": "outfit", "params": {
             "garment_id": garment_id,
             "source": request.source,
-            "cloth_type": request.cloth_type,
+            "cloth_type": cloth_type,
             "garment_name": garment_name,
         }}]
         ops.extend(ops_from_docs(replay_docs))
@@ -212,14 +229,14 @@ async def tryon_outfit(request: OutfitTryOnRequest, current_user: dict = Depends
         return OutfitTryOnResponse(**result)
 
     result = await synthesize_outfit_tryon(
-        person_image_id=request.person_image_id,
+        person_image_id=source_doc_id or request.person_image_id,
         garment_id=garment_id,
         source=request.source,
         garment_color=garment_color,
         garment_name=garment_name,
         garment_image_path=garment_image_path,
         garment_category=garment_category,
-        explicit_cloth_type=request.cloth_type,
+        explicit_cloth_type=cloth_type,
         user_id=user_id,
     )
 
@@ -853,9 +870,14 @@ async def remove_tryon_item(request: RemoveItemRequest, current_user: dict = Dep
     # accessories/makeup remove by slot; without a slot removes ALL items in that stage.
     replace_all = False
     slot = request.slot_value
-    if stage in ("outfit", "hairstyle"):
+    if stage == "hairstyle":
         replace_all = True
         slot = None
+    elif stage == "outfit":
+        if not slot:
+            replace_all = True
+        else:
+            replace_all = False
     elif stage in ("makeup", "accessories") and not slot:
         replace_all = True
     elif not slot:
