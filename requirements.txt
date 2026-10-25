@@ -42,7 +42,6 @@ httpx==0.28.1
 aiofiles==25.1.0
 torch==2.3.0
 torchvision==0.18.0
-Or as a comment block at the bottom:
 # --- Optional — Depth estimation (MiDaS) ---
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 # ============================================================
