@@ -160,47 +160,134 @@ def _apply_eyeshadow(
     intensity: float,
     finish: str,
 ) -> np.ndarray:
-    """Apply seamless gradient eyeshadow strictly onto the upper eyelid, never inside the eye."""
+    """
+    Apply photorealistic, anatomically-mapped eyeshadow:
+    - Layer 1: Mobile Eyelid (high pigment saturation from lash line to crease)
+    - Layer 2: Crease & Transition Blend (gradient falloff upward toward orbital bone)
+    - Eyeball / Cornea / Sclera Protection (dilated exclusion to guarantee zero bleeding)
+    - Upper Lash Line Tightlining (keeps eyelashes jet-black, crisp, and high-definition)
+    - Finish Shading: Matte (velvety pigment), Satin (luminous apex glow), Glossy/Metallic (faceted shimmer)
+    """
     h, w = canvas.shape[:2]
-    eye_mask = np.zeros((h, w), dtype=np.uint8)
 
-    # 1. Paint left upper eyelid
-    p_left_lid = np.array([pts[i] for i in LEFT_EYE_LID if i < len(pts)], dtype=np.int32)
+    # Anatomical landmark loops:
+    # Screen Left Eye (Model's Right Eye):
+    # Lash line (inner to outer): [33, 246, 161, 160, 159, 158, 157, 173, 133]
+    # Crease line (inner to outer): [243, 190, 56, 28, 27, 29, 30, 247]
+    # Upper crease / orbital blend: [226, 113, 225, 224, 223, 222, 221, 189]
+    l_lash = [33, 246, 161, 160, 159, 158, 157, 173, 133]
+    l_crease = [243, 190, 56, 28, 27, 29, 30, 247]
+    l_upper_crease = [226, 113, 225, 224, 223, 222, 221, 189]
+
+    # Screen Right Eye (Model's Left Eye):
+    # Lash line (inner to outer): [362, 398, 384, 385, 386, 387, 388, 466, 263]
+    # Crease line (inner to outer): [463, 414, 286, 258, 257, 259, 260, 467]
+    # Upper crease / orbital blend: [446, 342, 445, 444, 443, 442, 441, 413]
+    r_lash = [362, 398, 384, 385, 386, 387, 388, 466, 263]
+    r_crease = [463, 414, 286, 258, 257, 259, 260, 467]
+    r_upper_crease = [446, 342, 445, 444, 443, 442, 441, 413]
+
+    l_lash_pts = np.array([pts[i] for i in l_lash if i < len(pts)], dtype=np.int32)
+    l_crease_pts = np.array([pts[i] for i in l_crease if i < len(pts)], dtype=np.int32)
+    l_upper_pts = np.array([pts[i] for i in l_upper_crease if i < len(pts)], dtype=np.int32)
+
+    r_lash_pts = np.array([pts[i] for i in r_lash if i < len(pts)], dtype=np.int32)
+    r_crease_pts = np.array([pts[i] for i in r_crease if i < len(pts)], dtype=np.int32)
+    r_upper_pts = np.array([pts[i] for i in r_upper_crease if i < len(pts)], dtype=np.int32)
+
+    # 1. Base Density Mask (Floating point for seamless multi-tier shading)
+    density_mask = np.zeros((h, w), dtype=np.float32)
+
+    # Left eye polygons
+    if len(l_lash_pts) > 2 and len(l_crease_pts) > 2:
+        poly_l_mobile = np.vstack([l_lash_pts, l_crease_pts[::-1]])
+        cv2.fillPoly(density_mask, [poly_l_mobile], 1.0)
+    if len(l_crease_pts) > 2 and len(l_upper_pts) > 2:
+        poly_l_trans = np.vstack([l_crease_pts, l_upper_pts[::-1]])
+        cv2.fillPoly(density_mask, [poly_l_trans], 0.45)
+
+    # Right eye polygons
+    if len(r_lash_pts) > 2 and len(r_crease_pts) > 2:
+        poly_r_mobile = np.vstack([r_lash_pts, r_crease_pts[::-1]])
+        cv2.fillPoly(density_mask, [poly_r_mobile], 1.0)
+    if len(r_crease_pts) > 2 and len(r_upper_pts) > 2:
+        poly_r_trans = np.vstack([r_crease_pts, r_upper_pts[::-1]])
+        cv2.fillPoly(density_mask, [poly_r_trans], 0.45)
+
+    # Fallback if specific crease landmarks were out of range
+    if np.max(density_mask) == 0.0:
+        p_left_lid = np.array([pts[i] for i in LEFT_EYE_LID if i < len(pts)], dtype=np.int32)
+        p_right_lid = np.array([pts[i] for i in RIGHT_EYE_LID if i < len(pts)], dtype=np.int32)
+        if len(p_left_lid) > 2:
+            cv2.fillPoly(density_mask, [p_left_lid], 1.0)
+        if len(p_right_lid) > 2:
+            cv2.fillPoly(density_mask, [p_right_lid], 1.0)
+
+    # 2. Complete Eyeball / Cornea / Sclera Exclusion Mask
+    eyeball_mask = np.zeros((h, w), dtype=np.uint8)
     p_left_eye = np.array([pts[i] for i in LEFT_EYEBALL if i < len(pts)], dtype=np.int32)
-    cv2.fillPoly(eye_mask, [p_left_lid], 255)
-    cv2.fillPoly(eye_mask, [p_left_eye], 0)
-
-    # 2. Paint right upper eyelid
-    p_right_lid = np.array([pts[i] for i in RIGHT_EYE_LID if i < len(pts)], dtype=np.int32)
     p_right_eye = np.array([pts[i] for i in RIGHT_EYEBALL if i < len(pts)], dtype=np.int32)
-    cv2.fillPoly(eye_mask, [p_right_lid], 255)
-    cv2.fillPoly(eye_mask, [p_right_eye], 0)
+    if len(p_left_eye) > 2:
+        cv2.fillPoly(eyeball_mask, [p_left_eye], 255)
+    if len(p_right_eye) > 2:
+        cv2.fillPoly(eyeball_mask, [p_right_eye], 255)
 
-    # 3. Soft Gaussian feathering for smooth gradient falloff
-    eye_mask = cv2.GaussianBlur(eye_mask, (19, 19), 6)
+    # Dilate eyeball slightly to ensure crisp zero-bleed boundary at the lid-eye junction
+    kernel_eye = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    ball_dilated = cv2.dilate(eyeball_mask, kernel_eye, iterations=1)
+    density_mask[ball_dilated > 0] = 0.0
 
-    # 4. Realistic texture-preserving color blend
-    hsv_canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2HSV).astype(np.float32)
-    target_bgr = np.uint8([[[bgr_color[0], bgr_color[1], bgr_color[2]]]])
-    target_hsv = cv2.cvtColor(target_bgr, cv2.COLOR_BGR2HSV)[0, 0]
+    # 3. Soft Optical Gaussian Feathering (preserves opacity while smoothing crease transition)
+    feathered = cv2.GaussianBlur(density_mask, (9, 9), 2.2)
+    feathered[ball_dilated > 0] = 0.0
 
-    tinted_hsv = hsv_canvas.copy()
-    tinted_hsv[:, :, 0] = target_hsv[0]
-    tinted_hsv[:, :, 1] = np.clip(target_hsv[1] * 0.95, 0, 255)
+    # 4. Luminance-Preserving High-Fidelity Color Engine
+    canvas_f = canvas.astype(np.float32)
+    gray = cv2.cvtColor(canvas, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    norm_lum = gray / 255.0  # Skin highlights & creases modulate pigment depth
 
-    if finish == "matte":
-        alpha = 0.42 * intensity
-    elif finish == "glossy":
-        alpha = 0.60 * intensity
-        tinted_hsv[:, :, 2] = np.clip(hsv_canvas[:, :, 2] * 1.10, 0, 255)
-    else:  # satin
-        alpha = 0.50 * intensity
+    b_t, g_t, r_t = float(bgr_color[0]), float(bgr_color[1]), float(bgr_color[2])
+    target_vec = np.array([b_t, g_t, r_t], dtype=np.float32)
 
-    tinted_bgr = cv2.cvtColor(tinted_hsv.astype(np.uint8), cv2.COLOR_HSV2BGR).astype(np.float32)
-    alpha_mask = (eye_mask / 255.0 * alpha)[:, :, np.newaxis].astype(np.float32)
+    # Shaded pigment retains skin fold luminance for natural realism rather than flat paint
+    shaded_pigment = np.zeros_like(canvas_f)
+    for c in range(3):
+        shaded_pigment[:, :, c] = target_vec[c] * (0.50 + 0.50 * norm_lum)
 
-    result = canvas.astype(np.float32) * (1.0 - alpha_mask) + tinted_bgr * alpha_mask
-    return np.clip(result, 0, 255).astype(np.uint8)
+    # 5. Finish Shimmer / Highlight Processing
+    if finish in ["satin", "glossy", "metallic"] and len(pts) > 467:
+        shimmer_map = np.zeros((h, w), dtype=np.float32)
+        p_l_apex = pts[159]
+        p_r_apex = pts[386]
+        eye_w_l = max(4, int(np.linalg.norm(np.array(pts[33]) - np.array(pts[133])) * 0.18))
+        eye_w_r = max(4, int(np.linalg.norm(np.array(pts[362]) - np.array(pts[263])) * 0.18))
+
+        cv2.ellipse(shimmer_map, p_l_apex, (eye_w_l, 2), 0, 0, 360, 1.0, -1)
+        cv2.ellipse(shimmer_map, p_r_apex, (eye_w_r, 2), 0, 0, 360, 1.0, -1)
+        shimmer_map = cv2.GaussianBlur(shimmer_map, (9, 9), 2.5)
+        shimmer_map[ball_dilated > 0] = 0.0
+
+        shimmer_strength = 35.0 if finish in ["metallic", "glossy"] else 20.0
+        shaded_pigment = shaded_pigment + (shimmer_map[:, :, None] * shimmer_strength)
+
+    # 6. Alpha Composition
+    alpha_mult = float(np.clip(intensity * (0.75 if finish == "matte" else 0.82), 0.0, 1.0))
+    final_alpha = (feathered * alpha_mult)[:, :, None]
+
+    composited = canvas_f * (1.0 - final_alpha) + shaded_pigment * final_alpha
+
+    # 7. Eyelash Line Tightlining
+    # Restores deep contrast along the lash root for crisp, high-definition eye expression
+    if len(l_lash_pts) > 2 and len(r_lash_pts) > 2:
+        lash_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.polylines(lash_mask, [l_lash_pts, r_lash_pts], False, 255, 1, cv2.LINE_AA)
+        lash_feather = cv2.GaussianBlur(lash_mask, (3, 3), 0.8) / 255.0
+        lash_alpha = (lash_feather * 0.55)[:, :, None]
+
+        lash_bgr = np.array([18.0, 15.0, 16.0], dtype=np.float32)
+        composited = composited * (1.0 - lash_alpha) + lash_bgr * lash_alpha
+
+    return np.clip(composited, 0, 255).astype(np.uint8)
 
 
 def _apply_blush(

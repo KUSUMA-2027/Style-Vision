@@ -502,35 +502,49 @@ def synthesize_accessory_tryon(
 
         # ── 4. NOSE PIN ──────────────────────────────────────────────────────
         elif "nose" in subcat:
+            # Anatomical nose scan using MediaPipe 478-mesh landmarks
             p_tip = pt(1)
             p_bridge = pt(168)
-            p_eye_left = pt(33)   # viewer's left / model's right eye
-            p_eye_right = pt(263) # viewer's right / model's left eye
-            
-            nose_len = math.hypot(p_tip[0] - p_bridge[0], p_tip[1] - p_bridge[1])
+            p_eye_left = pt(33)    # viewer's left / model's right eye
+            p_eye_right = pt(263)  # viewer's right / model's left eye
+
+            p_nostril_l_crease = pt(278)  # Model's left alar groove (viewer's right)
+            p_nostril_l_wing = pt(358) if 358 in landmarks else p_nostril_l_crease
+            p_nostril_r_crease = pt(48)   # Model's right alar groove (viewer's left)
+            p_nostril_r_wing = pt(129) if 129 in landmarks else p_nostril_r_crease
+
+            # Measure nostril span for anatomical proportion scaling
+            nostril_span = math.hypot(
+                p_nostril_l_crease[0] - p_nostril_r_crease[0],
+                p_nostril_l_crease[1] - p_nostril_r_crease[1],
+            )
             scale_factor = override_scale if override_scale else 1.0
-            # Natural diamond nose stud scale: 12% of nose length (subtle, delicate, realistic)
-            pin_size = max(8, int(nose_len * 0.12 * scale_factor))
-            
-            # Scan face yaw / orientation to place pin on the camera-facing nostril
+
+            # Natural nose stud scale: 20% of nostril span (~2.2mm true scale, delicate & elegant)
+            pin_w = max(6, int(nostril_span * 0.20 * scale_factor))
+            aspect = acc_img.height / max(1, acc_img.width)
+            pin_h = max(6, int(pin_w * aspect))
+
+            # Scan facial yaw / orientation to determine camera-prominent nostril
             dist_l = abs(p_tip[0] - p_eye_left[0])
             dist_r = abs(p_tip[0] - p_eye_right[0])
-            
-            if dist_l < dist_r * 0.65:
-                # Head turned towards model's left (viewer's right) -> model's right nostril is prominent
-                p_crease = pt(48)
-                p_lobule = pt(240) if 240 in landmarks else p_crease
-                pierce_x = p_lobule[0] * 0.70 + p_tip[0] * 0.30
-                pierce_y = p_lobule[1] * 0.55 + p_crease[1] * 0.45
+
+            if dist_l < dist_r * 0.70:
+                # Head turned towards model's left (viewer's right) -> model's right nostril faces camera
+                pierce_x = p_nostril_r_crease[0] * 0.45 + p_nostril_r_wing[0] * 0.55
+                pierce_y = p_nostril_r_crease[1] * 0.60 + p_nostril_r_wing[1] * 0.40
                 nostril_name = "Right Nostril Alar Curve"
             else:
-                # Default / model facing forward or turned right -> model's left nostril (#278 / #460)
-                p_crease = pt(278)
-                p_lobule = pt(460) if 460 in landmarks else p_crease
-                pierce_x = p_lobule[0] * 0.70 + p_tip[0] * 0.30
-                pierce_y = p_lobule[1] * 0.55 + p_crease[1] * 0.45
+                # Standard Indian & modern placement: Model's left nostril (viewer's right)
+                pierce_x = p_nostril_l_crease[0] * 0.45 + p_nostril_l_wing[0] * 0.55
+                pierce_y = p_nostril_l_crease[1] * 0.60 + p_nostril_l_wing[1] * 0.40
                 nostril_name = "Left Nostril Alar Curve"
-                
+
+            # Roll angle for realistic orientation
+            dx_nose = p_nostril_l_crease[0] - p_nostril_r_crease[0]
+            dy_nose = p_nostril_l_crease[1] - p_nostril_r_crease[1]
+            angle_deg = -math.degrees(math.atan2(dy_nose, dx_nose))
+
             if override_x is not None:
                 pierce_x = override_x * pw
             if override_y is not None:
@@ -539,12 +553,17 @@ def synthesize_accessory_tryon(
                 pierce_x += offset_x
             if override_y is None and offset_y is not None:
                 pierce_y += offset_y
-                
-            resized_pin = acc_img.resize((pin_size, pin_size), Image.Resampling.LANCZOS)
-            paste_x = int(pierce_x - (resized_pin.width / 2.0))
-            paste_y = int(pierce_y - (resized_pin.height / 2.0))
-            canvas.alpha_composite(resized_pin, (paste_x, paste_y))
-            landmark_desc = f"{nostril_name} (Mesh Precision Placement)"
+
+            resized_pin = acc_img.resize((pin_w, pin_h), Image.Resampling.LANCZOS)
+            if abs(angle_deg) > 1.0:
+                rotated_pin = resized_pin.rotate(angle_deg, resample=Image.Resampling.BICUBIC, expand=True)
+            else:
+                rotated_pin = resized_pin
+
+            paste_x = int(pierce_x - (rotated_pin.width / 2.0))
+            paste_y = int(pierce_y - (rotated_pin.height / 2.0))
+            canvas.alpha_composite(rotated_pin, (paste_x, paste_y))
+            landmark_desc = f"{nostril_name} (Anatomical Nose Scan {nostril_span:.0f}px)"
 
         # ── 7. BAGS (TOTE BAG — HAND-HELD GRIP & HANG) ──────────────────────
         elif any(k in subcat for k in ["bag", "tote", "handbag", "purse"]):
