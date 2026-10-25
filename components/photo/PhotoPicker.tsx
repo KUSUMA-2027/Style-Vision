@@ -214,6 +214,14 @@ export const PhotoPicker: React.FC<PhotoPickerProps> = ({
               style={styles.actionBtn}
             />
           </View>
+
+          {/* Replacement reminder note */}
+          <View style={styles.cropNoteBannerSmall}>
+            <Text style={styles.cropNoteIcon}>✂️</Text>
+            <Text style={styles.cropNoteText}>
+              <Text style={styles.cropNoteHighlight}>Note:</Text> When replacing from gallery or camera, make sure the portrait or item comes completely under the crop section.
+            </Text>
+          </View>
         </View>
       ) : (
         // Empty State / Upload trigger
@@ -223,6 +231,14 @@ export const PhotoPicker: React.FC<PhotoPickerProps> = ({
           <Text style={styles.emptyDesc}>
             Front-facing photo with good lighting and clear view of face and upper body.
           </Text>
+
+          {/* Crop section guideline note */}
+          <View style={styles.cropNoteBanner}>
+            <Text style={styles.cropNoteIcon}>✂️</Text>
+            <Text style={styles.cropNoteText}>
+              <Text style={styles.cropNoteHighlight}>Note:</Text> While uploading pictures from your gallery or camera, ensure your portrait or item comes completely under the crop section.
+            </Text>
+          </View>
 
           <View style={styles.buttonsRow}>
             <TouchableOpacity style={styles.pickButton} onPress={handlePickLibrary}>
@@ -352,5 +368,44 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
+  },
+  cropNoteBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229, 169, 60, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.35)',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
+    width: '100%',
+  },
+  cropNoteBannerSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229, 169, 60, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.35)',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    marginTop: Spacing.sm,
+    gap: Spacing.sm,
+    width: '100%',
+  },
+  cropNoteIcon: {
+    fontSize: 16,
+  },
+  cropNoteText: {
+    flex: 1,
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  cropNoteHighlight: {
+    fontWeight: Typography.weights.bold,
+    color: Colors.primaryLight,
   },
 });

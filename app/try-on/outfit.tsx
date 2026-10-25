@@ -609,6 +609,14 @@ export default function OutfitTryOnScreen() {
               })}
             </View>
 
+            {/* Crop section note */}
+            <View style={styles.modalCropNote}>
+              <Text style={styles.modalCropNoteIcon}>✂️</Text>
+              <Text style={styles.modalCropNoteText}>
+                <Text style={styles.modalCropNoteBold}>Note:</Text> While uploading pictures from your gallery, ensure the garment comes completely under the crop section.
+              </Text>
+            </View>
+
             {uploadingDress ? (
               <View style={styles.modalLoading}>
                 <ActivityIndicator size="large" color={Colors.primary} />
@@ -932,4 +940,25 @@ const styles = StyleSheet.create({
   modalLoadingText: {
     color: Colors.textMuted,
     fontSize: Typography.sizes.xs,
-    marginTop: Spacing.sm}});
+    marginTop: Spacing.sm},
+  modalCropNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229, 169, 60, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.35)',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm},
+  modalCropNoteIcon: {
+    fontSize: 16},
+  modalCropNoteText: {
+    flex: 1,
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    lineHeight: 18},
+  modalCropNoteBold: {
+    color: Colors.primaryLight,
+    fontWeight: Typography.weights.bold}});

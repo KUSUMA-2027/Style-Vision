@@ -42,8 +42,17 @@ export default function UploadScreen() {
             <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Pose:</Text> Facing directly toward the camera, neutral posture.</Text>
             <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Background:</Text> Clean, uncluttered, or solid background works best.</Text>
             <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Wardrobe Fitting:</Text> Upper-body portrait visible from waist up.</Text>
+            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Crop Section:</Text> Portrait or any item should come completely under the crop section.</Text>
           </View>
         </Card>
+
+        {/* Prominent Crop Section Notice */}
+        <View style={styles.cropNoticeBox}>
+          <Text style={styles.cropNoticeIcon}>✂️</Text>
+          <Text style={styles.cropNoticeText}>
+            <Text style={styles.cropNoticeBold}>Note:</Text> While uploading pictures from your gallery, ensure your portrait or any item comes completely under the crop section.
+          </Text>
+        </View>
 
         {/* Interactive Photo Picker */}
         <PhotoPicker
@@ -103,5 +112,30 @@ const styles = StyleSheet.create({
   },
   continueBtn: {
     marginTop: Spacing.lg,
+  },
+  cropNoticeBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229, 169, 60, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.35)',
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    marginBottom: Spacing.xs,
+    gap: Spacing.sm,
+  },
+  cropNoticeIcon: {
+    fontSize: 16,
+  },
+  cropNoticeText: {
+    flex: 1,
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  cropNoticeBold: {
+    color: Colors.primaryLight,
+    fontWeight: Typography.weights.bold,
   },
 });
