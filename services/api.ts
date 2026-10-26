@@ -266,6 +266,11 @@ export const api = {
 
       return JSON.parse(uploadResult.body);
     },
+
+    deleteItem: (itemId: string) =>
+      request<any>("/api/v1/catalogue/" + itemId, {
+        method: 'DELETE',
+      }),
   },
 
   // --- Digital Wardrobe ("My Closet") ---

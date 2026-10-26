@@ -118,6 +118,8 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
   const applyServerSession = useCallback((data: any) => {
     if (data?.current_image?.url && data?.current_image?.image_id) {
       setCurrent({ image_id: data.current_image.image_id, url: data.current_image.url });
+    } else if (base) {
+      setCurrent(base);
     }
     const serverItems: SessionItem[] = (data?.items ?? [])
       .map(mapServerItem)
@@ -151,7 +153,7 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       }
     }
     setStages(builtStages);
-  }, []);
+  }, [base]);
 
   /** Fetch the authoritative session state from the backend. */
   const syncSession = useCallback(async () => {
@@ -281,6 +283,17 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
         const res = await api.tryon.removeItem(current.image_id, item.stage, item.slot ?? undefined);
         if (res?.status === 'failed') {
           return false;
+        }
+        setStages((prev) => {
+          const next = { ...prev };
+          delete next[item.stage];
+          return next;
+        });
+        setItems((prev) => prev.filter((i) => i.stage !== item.stage || (item.slot && i.slot !== item.slot)));
+        const newImgId = res?.result_image_id || res?.current_image_id;
+        const newUrl = res?.result_image_url || res?.current_image_url;
+        if (newImgId && newUrl) {
+          setCurrent({ image_id: newImgId, url: newUrl });
         }
         await syncSession();
         return true;

@@ -134,6 +134,28 @@ export default function AccessoriesScreen() {
     }
   };
 
+  const handleDeleteAccessory = (item: StyleItem) => {
+    Alert.alert('Remove Accessory', `Delete "${item.name}" from your accessories catalogue?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.catalogue.deleteItem(item.item_id);
+            if (selectedId === item.item_id) {
+              setSelectedId(null);
+            }
+            await loadCatalogue();
+            Alert.alert('Removed', `"${item.name}" has been deleted.`);
+          } catch (err: any) {
+            Alert.alert('Delete Failed', err.message || 'Could not delete accessory.');
+          }
+        },
+      },
+    ]);
+  };
+
   // Effective source image: latest chained result if a styling session is
   // active, otherwise the original uploaded portrait.
   const sourceImage = session.current ??
@@ -317,6 +339,11 @@ export default function AccessoriesScreen() {
                   ? item.thumbnail
                   : `${baseUrl}${item.thumbnail}`
                 : null;
+              const isCustom =
+                item.item_id.includes('custom') ||
+                item.tags?.includes('custom') ||
+                Boolean((item as any).is_custom) ||
+                Boolean(item.thumbnail?.includes('/uploads/accessories/'));
               return (
                 <TouchableOpacity
                   key={item.item_id}
@@ -324,6 +351,18 @@ export default function AccessoriesScreen() {
                   onPress={() => setSelectedId(item.item_id)}
                   activeOpacity={0.7}
                 >
+                  {isCustom && (
+                    <TouchableOpacity
+                      style={styles.deleteAccBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handleDeleteAccessory(item);
+                      }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={styles.deleteAccText}>✕</Text>
+                    </TouchableOpacity>
+                  )}
                   {photoUri ? (
                     <Image source={{ uri: photoUri }} style={styles.accessoryPhoto} resizeMode="contain" />
                   ) : (
@@ -552,6 +591,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     position: 'relative'},
   itemCardSelected: { borderColor: Colors.primary, backgroundColor: Colors.primaryGlow },
+  deleteAccBtn: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    zIndex: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  deleteAccText: {
+    color: '#FF4D4F',
+    fontSize: 12,
+    fontWeight: 'bold',
+    lineHeight: 14,
+  },
   colorDot: {
     width: 28,
     height: 28,

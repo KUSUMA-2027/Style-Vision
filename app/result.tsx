@@ -21,7 +21,7 @@ import {
   useStylingSession,
   STAGE_ORDER,
   STAGE_LABEL,
-  NEXT_STAGE_ROUTE,
+  STAGE_ROUTE,
   type Stage,
 } from '@/services/session';
 
@@ -90,7 +90,7 @@ export default function ResultScreen() {
     const idx = STAGE_ORDER.indexOf(currentStage);
     return STAGE_ORDER.slice(idx + 1).find((s) => !session.stages[s]) ?? null;
   })();
-  const continueRoute = nextStage ? NEXT_STAGE_ROUTE[nextStage] : '/complete-look';
+  const continueRoute = nextStage ? STAGE_ROUTE[nextStage] : '/complete-look';
   const continueLabel = nextStage ? `Continue to ${STAGE_LABEL[nextStage]}` : 'View Complete Look';
   const allStagesDone = STAGE_ORDER.every((s) => Boolean(session.stages[s]));
   const isChainedResult = Boolean(
