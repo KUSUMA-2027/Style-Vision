@@ -444,6 +444,15 @@ async def get_session_stages(user_id: str, base_image_id: str) -> dict:
             "stage": current_doc.get("stage"),
             "created_at": current_doc.get("created_at"),
         }
+    else:
+        base_doc = await db["images"].find_one({"user_id": user_id, "image_id": base_image_id})
+        if base_doc:
+            current_image = {
+                "image_id": base_doc.get("image_id"),
+                "url": base_doc.get("url"),
+                "stage": None,
+                "created_at": base_doc.get("created_at"),
+            }
 
     items = await get_live_items(user_id, current_image["image_id"]) if current_image else []
 

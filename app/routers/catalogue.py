@@ -158,6 +158,35 @@ async def upload_custom_accessory(
     return _doc_to_response(doc)
 
 
+@router.delete(
+    "/{item_id}",
+    summary="Remove a style item from the catalogue",
+)
+async def delete_catalogue_item(item_id: str):
+    """Permanently remove an item from MongoDB catalogue and disk."""
+    db = get_database()
+    col = db["catalogue"]
+    item = await col.find_one({"item_id": item_id})
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Style item '{item_id}' not found.",
+        )
+    thumb = item.get("thumbnail")
+    if thumb and "uploads" in thumb:
+        file_path = os.path.join(settings.upload_dir, "accessories", os.path.basename(thumb))
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+    await col.delete_one({"item_id": item_id})
+    return {
+        "message": f"Style item '{item_id}' successfully removed from catalogue.",
+        "deleted_id": item_id,
+    }
+
+
 async def _seed_catalogue(col):
     """Seed the MongoDB catalogue with the initial style items."""
     now = datetime.now(timezone.utc)

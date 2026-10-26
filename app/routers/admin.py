@@ -4,7 +4,10 @@ Allows administrators to manage the MongoDB catalogue of virtual try-on style it
 """
 from datetime import datetime, timezone
 import uuid
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
+
+from app.config import get_settings
 
 from app.models.catalogue import (
     CreateStyleItemRequest,
@@ -14,6 +17,8 @@ from app.models.catalogue import (
 from app.utils.security import get_current_admin
 from app.database import get_database
 from app.routers.catalogue import _doc_to_response
+
+settings = get_settings()
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Administrator Management"], dependencies=[Depends(get_current_admin)])
 
@@ -93,12 +98,23 @@ async def delete_catalogue_item(item_id: str):
     db = get_database()
     col = db["catalogue"]
 
-    result = await col.delete_one({"item_id": item_id})
-    if result.deleted_count == 0:
+    item = await col.find_one({"item_id": item_id})
+    if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Style item '{item_id}' not found.",
         )
+
+    thumb = item.get("thumbnail")
+    if thumb and "uploads" in thumb:
+        file_path = os.path.join(settings.upload_dir, "accessories", os.path.basename(thumb))
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
+    await col.delete_one({"item_id": item_id})
     return {
         "message": f"Style item '{item_id}' successfully removed from catalogue.",
         "deleted_id": item_id,
