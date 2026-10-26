@@ -43,6 +43,8 @@ from app.services.image_registry import (
     _disk_path_from_url,
     register_stage_result,
     get_chain,
+    get_chain_docs,
+    _slot_of_doc,
     get_session_stages,
     resolve_stage_replay,
     load_image_from_doc,
@@ -922,6 +924,48 @@ async def remove_tryon_item(request: RemoveItemRequest, current_user: dict = Dep
             error=f"Could not rebuild the look without this item: {exc}",
         )
 
+    root_id = source_doc.get("root_image_id") or source_doc.get("image_id")
+    db = get_database()
+
+    # Mark dropped documents in images collection as removed so they are omitted from future sessions
+    if replace_all:
+        await db["images"].update_many(
+            {
+                "user_id": user_id,
+                "$or": [
+                    {"root_image_id": root_id, "stage": stage},
+                    {"stage": stage, "image_id": request.person_image_id},
+                ],
+            },
+            {"$set": {"metadata.removed": True, "is_active": False}},
+        )
+    elif slot:
+        await db["images"].update_many(
+            {
+                "user_id": user_id,
+                "root_image_id": root_id,
+                "stage": stage,
+                "$or": [
+                    {"metadata.subcategory": slot},
+                    {"metadata.makeup_type": slot},
+                    {"metadata.cloth_type": slot},
+                ],
+            },
+            {"$set": {"metadata.removed": True, "is_active": False}},
+        )
+
+    chain = await get_chain_docs(user_id, request.person_image_id)
+    dropped_docs = [
+        d for d in chain
+        if d.get("stage") == stage and (replace_all or _slot_of_doc(stage, d) == slot)
+    ]
+    dropped_ids = [d.get("image_id") for d in dropped_docs if d.get("image_id")]
+    if dropped_ids:
+        await db["images"].update_many(
+            {"user_id": user_id, "image_id": {"$in": dropped_ids}},
+            {"$set": {"metadata.removed": True, "is_active": False}},
+        )
+
     try:
         await register_stage_result(
             user_id=user_id,
@@ -941,14 +985,14 @@ async def remove_tryon_item(request: RemoveItemRequest, current_user: dict = Dep
     except Exception as reg_err:
         logger.warning("[Remove] Failed to register removal result: %s", reg_err)
 
-    remaining = await get_live_items(user_id, tryon_id)
+    remaining = await get_live_items(user_id, final_id)
     return RemoveItemResponse(
         status=TryOnStatus.completed,
         removed_stage=stage,
         removed_slot=slot,
-        result_image_id=tryon_id,
+        result_image_id=final_id,
         result_image_url=result_url,
-        current_image_id=tryon_id,
+        current_image_id=final_id,
         remaining_items=remaining,
     )
 
