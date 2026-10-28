@@ -147,17 +147,17 @@ export default function MakeupStudioScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Engine Banner */}
+        {/* Beauty Studio Banner */}
         <Card style={styles.engineCard} variant="flat">
           <View style={styles.engineRow}>
-            <Text style={styles.engineIcon}>🎨</Text>
+            <Text style={styles.engineIcon}>💄</Text>
             <View style={styles.engineInfo}>
-              <Text style={styles.engineTitle}>Facial Landmark Alpha-Blending</Text>
+              <Text style={styles.engineTitle}>Natural Glamour & Beauty</Text>
               <Text style={styles.engineDesc}>
-                OpenCV + MediaPipe: Lip perimeter and eye orbit landmark color tinting
+                Subtle lipstick and blush shades blended naturally to complement your skin tone
               </Text>
             </View>
-            <Badge label="CPU Live" variant="warning" />
+            <Badge label="Beauty Studio" variant="primary" />
           </View>
         </Card>
 

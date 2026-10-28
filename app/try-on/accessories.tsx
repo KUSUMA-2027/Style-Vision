@@ -222,17 +222,17 @@ export default function AccessoriesScreen() {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        {/* MediaPipe Info Banner */}
+        {/* Smart Placement Banner */}
         <Card style={styles.engineCard} variant="flat">
           <View style={styles.engineRow}>
-            <Text style={styles.engineIcon}>🎯</Text>
+            <Text style={styles.engineIcon}>✨</Text>
             <View style={styles.engineInfo}>
-              <Text style={styles.engineTitle}>MediaPipe Landmark Anchoring</Text>
+              <Text style={styles.engineTitle}>Smart Placement & Scaling</Text>
               <Text style={styles.engineDesc}>
-                Accessories are placed using detected facial mesh and pose landmarks for accurate spatial fitting.
+                Jewelry and accessories are automatically proportioned and aligned to your face and pose.
               </Text>
             </View>
-            <Badge label="Landmarks" variant="success" />
+            <Badge label="Auto Fit" variant="success" />
           </View>
         </Card>
 
@@ -388,11 +388,11 @@ export default function AccessoriesScreen() {
         {selectedId && (() => {
           const item = items.find((i) => i.item_id === selectedId);
           const anchorMap: Record<string, string> = {
-            glasses: 'Eye Bridge (Facial Mesh #168)',
-            earrings: 'Earlobes (Mesh #234, #454)',
-            necklace: 'Collarbones (Pose #11, #12)',
-            nose_pin: 'Nostril Curve (Mesh #278)',
-            bags: 'Shoulder Pose (#11)',
+            glasses: 'Eyewear Center & Nose Bridge',
+            earrings: 'Earlobes (Bilateral Alignment)',
+            necklace: 'Neckline & Collar Area',
+            nose_pin: 'Nostril Contouring',
+            bags: 'Shoulder & Arm Drape',
           };
           return item ? (
             <Card style={styles.descCard} variant="outlined">
@@ -400,7 +400,7 @@ export default function AccessoriesScreen() {
               {item.description && <Text style={styles.descText}>{item.description}</Text>}
               {item.subcategory && anchorMap[item.subcategory] && (
                 <View style={styles.anchorRow}>
-                  <Text style={styles.anchorLabel}>📍 Landmark: </Text>
+                  <Text style={styles.anchorLabel}>📍 Fit Position: </Text>
                   <Text style={styles.anchorValue}>{anchorMap[item.subcategory]}</Text>
                 </View>
               )}

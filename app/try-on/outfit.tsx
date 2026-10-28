@@ -555,7 +555,7 @@ export default function OutfitTryOnScreen() {
         <Button
           title={
             isProcessing
-              ? 'Warping & Fitting Garment...'
+              ? 'Fitting Your Style...'
               : sourceTab === 'wardrobe'
               ? 'Try On My Dress ✨'
               : 'Try On Style ✨'
@@ -569,7 +569,7 @@ export default function OutfitTryOnScreen() {
         />
 
         <Text style={styles.disclaimer}>
-          * Digital wardrobe try-on fits your photographed clothes onto your body photo without changing physically!
+          * Virtual fitting naturally drapes and tailors the selected garment directly to your posture.
         </Text>
       </ScrollView>
 
@@ -613,7 +613,7 @@ export default function OutfitTryOnScreen() {
             <View style={styles.modalCropNote}>
               <Text style={styles.modalCropNoteIcon}>✂️</Text>
               <Text style={styles.modalCropNoteText}>
-                <Text style={styles.modalCropNoteBold}>Note:</Text> While uploading pictures from your gallery, ensure the garment comes completely under the crop section.
+                <Text style={styles.modalCropNoteBold}>Tip:</Text> Keep the garment fully centered inside the crop frame for best fitting.
               </Text>
             </View>
 

@@ -209,13 +209,11 @@ export default function ProfileScreen() {
 
         {/* App Info Card */}
         <Card style={styles.infoCard} variant="flat">
-          <Text style={styles.infoTitle}>StyleVision Architecture</Text>
+          <Text style={styles.infoTitle}>About StyleVision</Text>
           <Text style={styles.infoText}>
-            • Frontend: React Native 0.86 + Expo SDK 57{'\n'}
-            • Backend: FastAPI 0.115 + Python 3.12{'\n'}
-            • Database: MongoDB 8.2 + Motor Async Driver{'\n'}
-            • AI Models: MediaPipe Face/Pose + CatVTON Architecture{'\n'}
-            • App Version: v{Constants.expoConfig?.version ?? '1.0.0'}
+            StyleVision is an intelligent virtual styling studio enabling seamless try-on for outfits, fine jewelry, hairstyles, and makeup on your portrait.{'\n\n'}
+            • App Version: v{Constants.expoConfig?.version ?? '1.0.0'}{'\n'}
+            • Privacy: 100% Protected and secure processing
           </Text>
         </Card>
       </ScrollView>

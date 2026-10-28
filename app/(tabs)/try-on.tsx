@@ -51,7 +51,7 @@ export default function TryOnHubScreen() {
       desc: 'Bespoke garment fitting with true collar, shoulder span and posture alignment',
       route: '/try-on/outfit',
       icon: '👗',
-      badge: 'Neural Diffusion',
+      badge: 'Virtual Dressing',
       badgeVariant: 'primary' as const,
       category: 'outfit' as const},
     {
@@ -60,7 +60,7 @@ export default function TryOnHubScreen() {
       desc: 'Diamond tennis bracelets, aviators, luxury necklaces, rings & handbags',
       route: '/try-on/accessories',
       icon: '💎',
-      badge: 'Pose Anchored',
+      badge: 'Smart Placement',
       badgeVariant: 'success' as const,
       category: 'accessories' as const},
     {
@@ -69,7 +69,7 @@ export default function TryOnHubScreen() {
       desc: 'Velvet lipsticks, metallic eyeshadow palettes & skin contour blending',
       route: '/try-on/makeup',
       icon: '💄',
-      badge: 'Mesh Blend',
+      badge: 'Natural Glamour',
       badgeVariant: 'warning' as const,
       category: 'makeup' as const},
     {
@@ -78,7 +78,7 @@ export default function TryOnHubScreen() {
       desc: 'Textured beach waves, chic bobs, layered shags & custom color tints',
       route: '/try-on/hairstyle',
       icon: '✂️',
-      badge: 'Cranial Pose',
+      badge: 'Salon Styling',
       badgeVariant: 'muted' as const,
       category: 'hairstyle' as const},
   ];

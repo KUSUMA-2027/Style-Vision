@@ -34,25 +34,15 @@ export default function UploadScreen() {
       <Header title="Atelier Portrait Studio" showBack />
 
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Quality Guidelines Card */}
+        {/* Portrait Guidelines Card */}
         <Card style={styles.tipsCard} variant="outlined">
-          <Text style={styles.tipsTitle}>👑 Haute Couture Portrait Guidelines</Text>
+          <Text style={styles.tipsTitle}>✨ Portrait Photo Tips</Text>
           <View style={styles.tipsList}>
-            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Lighting:</Text> Bright, evenly-lit face without harsh shadows.</Text>
-            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Pose:</Text> Facing directly toward the camera, neutral posture.</Text>
-            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Background:</Text> Clean, uncluttered, or solid background works best.</Text>
-            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Wardrobe Fitting:</Text> Upper-body portrait visible from waist up.</Text>
-            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Crop Section:</Text> Portrait or any item should come completely under the crop section.</Text>
+            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Lighting & Pose:</Text> Bright, even lighting facing directly forward.</Text>
+            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Fitting:</Text> Upper-body or full-body portrait with clear posture.</Text>
+            <Text style={styles.tipItem}>• <Text style={styles.tipBold}>Crop Framing:</Text> Ensure your portrait is centered and fully visible inside the crop box.</Text>
           </View>
         </Card>
-
-        {/* Prominent Crop Section Notice */}
-        <View style={styles.cropNoticeBox}>
-          <Text style={styles.cropNoticeIcon}>✂️</Text>
-          <Text style={styles.cropNoticeText}>
-            <Text style={styles.cropNoticeBold}>Note:</Text> While uploading pictures from your gallery, ensure your portrait or any item comes completely under the crop section.
-          </Text>
-        </View>
 
         {/* Interactive Photo Picker */}
         <PhotoPicker

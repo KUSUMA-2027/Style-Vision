@@ -72,15 +72,15 @@ export default function ResultScreen() {
     params.mode === 'replicate' ||
     lookCategory === 'outfit';
 
-  const engineTitle = isGpu ? 'Generated on Cloud GPU' : 'Generated on Local Engine';
-  const engineBadgeText = isGpu ? '🚀 CLOUD AI (CatVTON GPU)' : '⚡ LOCAL AI (MediaPipe)';
+  const engineTitle = 'Styling Complete';
+  const engineBadgeText = isGpu ? '✨ Studio Fit' : '✨ Precision Styled';
   const engineSubtitle = isGpu
-    ? 'NVIDIA Tesla T4 Cloud Server • CatVTON Neural Diffusion Pipeline'
+    ? 'Photorealistic virtual fitting tailored to your posture'
     : lookCategory === 'accessories'
-    ? 'MediaPipe 478 Landmark Alignment • Real-time geometry • 100% Face Preserved'
+    ? 'Accurately positioned with natural lighting'
     : lookCategory === 'hairstyle'
-    ? 'MediaPipe Cranial Head Pose • Natural HSV tinting • 100% Identity Preserved'
-    : 'MediaPipe Sub-pixel Face Mesh • Real-time portrait blend';
+    ? 'Blended seamlessly with your facial contours'
+    : 'Softly blended with your natural skin tone';
 
   // Which stage of the pipeline is this result? (drives progress bar + continue flow)
   const currentStage = (STAGE_ORDER as readonly string[]).includes(lookCategory)
@@ -327,14 +327,14 @@ export default function ResultScreen() {
         >
           <View style={styles.sourceRow}>
             <View style={[styles.sourceIconWrap, isGpu ? styles.iconWrapGpu : styles.iconWrapLocal]}>
-              <Text style={styles.sourceEmoji}>{isGpu ? '🚀' : '⚡'}</Text>
+              <Text style={styles.sourceEmoji}>{isGpu ? '✨' : '🎨'}</Text>
             </View>
             <View style={styles.sourceTextWrap}>
               <View style={styles.sourceTitleRow}>
                 <Text style={styles.sourceTitle}>{engineTitle}</Text>
                 <View style={[styles.sourcePill, isGpu ? styles.pillGpu : styles.pillLocal]}>
                   <Text style={[styles.sourcePillText, isGpu ? styles.pillTextGpu : styles.pillTextLocal]}>
-                    {isGpu ? 'GPU ACCELERATED' : 'DEVICE NATIVE'}
+                    {isGpu ? 'STUDIO QUALITY' : 'INSTANT FIT'}
                   </Text>
                 </View>
               </View>
@@ -526,42 +526,39 @@ export default function ResultScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Technical Inference Metrics */}
+        {/* Style Overview Summary */}
         <Card style={styles.metricsCard} variant="outlined">
-          <Text style={styles.metricsHeading}>📊 AI Processing Breakdown</Text>
+          <Text style={styles.metricsHeading}>✨ Style & Fit Summary</Text>
           <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Execution Source</Text>
-            <View style={styles.metricBadgeWrap}>
-              <View style={[styles.engineDot, isGpu ? styles.dotGpu : styles.dotLocal]} />
-              <Text style={[styles.metricValue, { color: isGpu ? '#10B981' : '#60A5FA', fontWeight: 'bold' }]}>
-                {isGpu ? 'Cloud GPU (NVIDIA Tesla T4)' : 'Local Machine (CPU / MediaPipe)'}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.metricDivider} />
-          <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Engine Architecture</Text>
-            <Text style={styles.metricValue}>
-              {isGpu
-                ? 'CatVTON Diffusion Warp (Photorealistic Draping)'
+            <Text style={styles.metricLabel}>Styling Category</Text>
+            <Text style={[styles.metricValue, { fontWeight: '600' }]}>
+              {lookCategory === 'outfit'
+                ? 'Apparel & Wardrobe'
                 : lookCategory === 'accessories'
-                ? 'MediaPipe FaceMesh (478 pts) & Pose Geometry'
+                ? 'Fine Accessories'
                 : lookCategory === 'hairstyle'
-                ? 'MediaPipe Cranial Head Orientation & HSV'
-                : 'MediaPipe Face Mesh + Alpha Blending'}
+                ? 'Hair & Silhouette'
+                : 'Makeup & Beauty'}
             </Text>
           </View>
           <View style={styles.metricDivider} />
           <View style={styles.metricRow}>
-            <Text style={styles.metricLabel}>Latency / Speed</Text>
+            <Text style={styles.metricLabel}>Fit & Alignment</Text>
             <Text style={styles.metricValue}>
-              {isGpu ? '~1.8s (Cloud GPU Inference)' : '< 120ms (Instant On-Device)'}
+              {lookCategory === 'outfit'
+                ? 'Adaptive body posture alignment'
+                : 'Anatomical precision alignment'}
             </Text>
+          </View>
+          <View style={styles.metricDivider} />
+          <View style={styles.metricRow}>
+            <Text style={styles.metricLabel}>Visual Quality</Text>
+            <Text style={styles.metricValue}>High-Definition Studio Render</Text>
           </View>
           <View style={styles.metricDivider} />
           <View style={styles.metricRow}>
             <Text style={styles.metricLabel}>Identity Guarantee</Text>
-            <Text style={styles.metricValue}>100% Face & Skin Preserved (Zero Distortion)</Text>
+            <Text style={styles.metricValue}>100% Face & Skin Preserved</Text>
           </View>
         </Card>
 
