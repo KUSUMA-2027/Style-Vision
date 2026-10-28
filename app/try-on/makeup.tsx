@@ -36,7 +36,7 @@ export default function MakeupStudioScreen() {
   const [latestPortrait, setLatestPortrait] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'lipstick' | 'eyeshadow' | 'blush'>('lipstick');
+  const [activeTab, setActiveTab] = useState<'lipstick' | 'blush' | 'eyelashes' | 'eyeshadow'>('lipstick');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [finish, setFinish] = useState<'matte' | 'satin' | 'glossy'>('satin');
   const [intensity, setIntensity] = useState<number>(60);
@@ -154,7 +154,7 @@ export default function MakeupStudioScreen() {
             <View style={styles.engineInfo}>
               <Text style={styles.engineTitle}>Natural Glamour & Beauty</Text>
               <Text style={styles.engineDesc}>
-                Subtle lipstick and blush shades blended naturally to complement your skin tone
+                Velvet lipsticks, radiant blushes, volumetric eyelashes & metallic eyeshadow palettes
               </Text>
             </View>
             <Badge label="Beauty Studio" variant="primary" />
@@ -206,9 +206,21 @@ export default function MakeupStudioScreen() {
 
         {/* Studio Product Switcher */}
         <Text style={styles.sectionHeading}>2. Choose Product</Text>
-        <View style={styles.tabBar}>
-          {(['lipstick', 'eyeshadow', 'blush'] as const).map((tab) => {
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabBar}
+        >
+          {(['lipstick', 'blush', 'eyelashes', 'eyeshadow'] as const).map((tab) => {
             const active = activeTab === tab;
+            const tabLabel =
+              tab === 'lipstick'
+                ? '💄 Lipstick'
+                : tab === 'blush'
+                ? '🌸 Blush'
+                : tab === 'eyelashes'
+                ? '✨ Eyelashes'
+                : '👁️ Eyeshadow';
             return (
               <TouchableOpacity
                 key={tab}
@@ -220,12 +232,12 @@ export default function MakeupStudioScreen() {
                 style={[styles.tabBtn, active && styles.tabBtnActive]}
               >
                 <Text style={[styles.tabText, active && styles.tabTextActive]}>
-                  {tab === 'lipstick' ? '💄 Lipstick' : tab === 'eyeshadow' ? '👁️ Eyeshadow' : '🌸 Blush'}
+                  {tabLabel}
                 </Text>
               </TouchableOpacity>
             );
           })}
-        </View>
+        </ScrollView>
 
         {/* Catalogue States */}
         {loading && (
@@ -398,11 +410,13 @@ const styles = StyleSheet.create({
     padding: 4,
     marginBottom: Spacing.xl,
     borderWidth: 1,
-    borderColor: Colors.border},
+    borderColor: Colors.border,
+    gap: 4},
   tabBtn: {
-    flex: 1,
     paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.md,
     alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: BorderRadius.md},
   tabBtnActive: {
     backgroundColor: Colors.primary},
