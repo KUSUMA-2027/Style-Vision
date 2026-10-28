@@ -149,30 +149,82 @@ def _extract_earring_pair(acc_img: Image.Image) -> Tuple[Image.Image, Image.Imag
 
 
 def _clean_accessory_background(img: Image.Image) -> Image.Image:
-    """If image is not already transparent RGBA, remove white/solid background and discard small noise/watermarks."""
+    """
+    Robust background cleaner for jewelry and accessories:
+    - If already transparent RGBA (>2% alpha transparency), preserves directly.
+    - Full perimeter edge sampling across all 4 borders (robust against chains or hooks touching corners).
+    - Intelligent background classification:
+        * Black/Dark velvet background (common for gold & diamond jewelry)
+        * White/Light studio background
+        * Solid monochrome / studio color sweeps
+    - Preserves delicate chain loops, earring hooks, and sparkling gem facets.
+    - Soft sub-pixel antialiased alpha boundary (no black halos, no jagged staircases).
+    - Tight bounding box crop.
+    """
     img_rgba = img.convert("RGBA")
     arr = np.array(img_rgba, dtype=np.float32)
     h, w = arr.shape[:2]
-    # Sample 4 corners
-    corners = [arr[0, 0, :3], arr[0, w - 1, :3], arr[h - 1, 0, :3], arr[h - 1, w - 1, :3]]
-    bg = np.median(corners, axis=0)
-    diff = np.sqrt(np.sum((arr[:, :, :3] - bg) ** 2, axis=-1))
-    mask = diff > 25.0
 
-    # Filter out small disconnected noise / watermarks (less than 8% of dominant object area)
-    num, labels, stats, centroids = cv2.connectedComponentsWithStats(mask.astype(np.uint8))
+    # 1. If image already has genuine transparency, trim and return directly
+    existing_alpha = arr[:, :, 3]
+    if (existing_alpha < 240).sum() > (h * w * 0.02):
+        return _trim_to_alpha_bbox(img_rgba)
+
+    # 2. Sample perimeter edges to accurately detect background color
+    edge_pixels = []
+    step_w = max(1, w // 40)
+    step_h = max(1, h // 40)
+    for x in range(0, w, step_w):
+        edge_pixels.extend([arr[0, x, :3], arr[1, x, :3], arr[h - 1, x, :3], arr[h - 2, x, :3]])
+    for y in range(0, h, step_h):
+        edge_pixels.extend([arr[y, 0, :3], arr[y, 1, :3], arr[y, w - 1, :3], arr[y, w - 2, :3]])
+
+    edge_arr = np.array(edge_pixels)
+    bg_color = np.median(edge_arr, axis=0)
+    bg_spread = float(np.std(edge_arr))
+    bg_lum = 0.299 * bg_color[0] + 0.587 * bg_color[1] + 0.114 * bg_color[2]
+
+    # Color difference from background
+    color_diff = np.sqrt(np.sum((arr[:, :, :3] - bg_color) ** 2, axis=-1))
+
+    # 3. Adaptive thresholding based on background type
+    if bg_lum < 40.0:
+        # ── BLACK / DARK VELVET BACKGROUND ──
+        pixel_lum = 0.299 * arr[:, :, 0] + 0.587 * arr[:, :, 1] + 0.114 * arr[:, :, 2]
+        thresh = max(18.0, bg_lum + 16.0)
+        mask = (color_diff > thresh) & (pixel_lum > thresh)
+    elif bg_lum > 215.0:
+        # ── WHITE / LIGHT STUDIO BACKGROUND ──
+        thresh = max(20.0, min(50.0, bg_spread * 1.5 + 18.0))
+        mask = color_diff > thresh
+    else:
+        # ── SOLID MONOCHROME STUDIO BACKGROUND ──
+        thresh = max(22.0, min(55.0, bg_spread * 1.6 + 20.0))
+        mask = color_diff > thresh
+
+    mask_u8 = mask.astype(np.uint8) * 255
+
+    # 4. Connected components filtering: remove specks/dust but keep fine jewelry chains
+    num, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_u8)
     if num > 2:
         max_area = max(stats[i, cv2.CC_STAT_AREA] for i in range(1, num))
+        min_area_thresh = max(12, int(max_area * 0.008))
+        filtered_mask = np.zeros_like(mask_u8)
         for i in range(1, num):
-            if stats[i, cv2.CC_STAT_AREA] < max_area * 0.08:
-                mask[labels == i] = False
+            if stats[i, cv2.CC_STAT_AREA] >= min_area_thresh:
+                filtered_mask[labels == i] = 255
+        mask_u8 = filtered_mask
 
-    arr[:, :, 3] = np.where(mask, 255.0, 0.0)
-    # Zero out edge pixels (3px borders and 4px bottom) to prevent any border cropping artifacts
-    arr[:3, :, 3] = 0.0
-    arr[-4:, :, 3] = 0.0
-    arr[:, :3, 3] = 0.0
-    arr[:, -3:, 3] = 0.0
+    # 5. Soft optical Gaussian feathering along fine metallic edges
+    alpha = cv2.GaussianBlur(mask_u8.astype(np.float32), (3, 3), 0.7)
+
+    # 6. Guard perimeter 1px boundary
+    alpha[0, :] = 0.0
+    alpha[-1, :] = 0.0
+    alpha[:, 0] = 0.0
+    alpha[:, -1] = 0.0
+
+    arr[:, :, 3] = alpha
     cleaned = Image.fromarray(arr.astype(np.uint8), "RGBA")
     return _trim_to_alpha_bbox(cleaned)
 
