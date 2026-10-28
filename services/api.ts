@@ -267,6 +267,65 @@ export const api = {
       return JSON.parse(uploadResult.body);
     },
 
+    uploadHairstyle: async (uri: string, name: string, subcategory: string = 'medium', mimeType: string = 'image/png') => {
+      const baseUrl = getApiBaseUrl();
+      const token = await getAuthToken();
+
+      if (Platform.OS === 'web') {
+        const formData = new FormData();
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append('file', blob, `${name.replace(/\s+/g, '_').toLowerCase()}.png`);
+        formData.append('name', name);
+        formData.append('subcategory', subcategory);
+
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const res = await fetch(`${baseUrl}/api/v1/catalogue/upload-hairstyle`, {
+          method: 'POST',
+          body: formData,
+          headers,
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `Upload failed with status ${res.status}`);
+        }
+        return res.json();
+      }
+
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const uploadResult = await FileSystem.uploadAsync(
+        `${baseUrl}/api/v1/catalogue/upload-hairstyle`,
+        uri,
+        {
+          fieldName: 'file',
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          parameters: {
+            name,
+            subcategory,
+          },
+          headers,
+        }
+      );
+
+      if (uploadResult.status < 200 || uploadResult.status >= 300) {
+        let errorDetail = `Upload failed with status ${uploadResult.status}`;
+        try {
+          const parsed = JSON.parse(uploadResult.body);
+          if (parsed.detail) errorDetail = parsed.detail;
+          if (parsed.error) errorDetail = parsed.error;
+        } catch (_) {}
+        throw new Error(errorDetail);
+      }
+
+      return JSON.parse(uploadResult.body);
+    },
+
     deleteItem: (itemId: string) =>
       request<any>("/api/v1/catalogue/" + itemId, {
         method: 'DELETE',

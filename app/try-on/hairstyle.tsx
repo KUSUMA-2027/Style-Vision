@@ -7,9 +7,13 @@ import {
   TouchableOpacity,
   Alert,
   Image,
-  ActivityIndicator} from 'react-native';
+  ActivityIndicator,
+  Modal,
+  TextInput,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -27,6 +31,7 @@ interface StyleItem {
   thumbnail?: string;
   color?: string;
   tags: string[];
+  is_custom?: boolean;
 }
 
 interface HairColor {
@@ -35,11 +40,14 @@ interface HairColor {
   hex: string;
 }
 
+type HairSubCat = 'all' | 'short' | 'medium' | 'long' | 'updo';
+
 const HAIR_EMOJIS: Record<string, string> = {
   short: '💇‍♂️',
   medium: '👩‍🦱',
   long: '👱‍♀️',
-  updo: '💇‍♀️'};
+  updo: '💇‍♀️',
+};
 
 export default function HairstyleScreen() {
   const router = useRouter();
@@ -52,6 +60,13 @@ export default function HairstyleScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedColor, setSelectedColor] = useState<string>('c-1');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [subFilter, setSubFilter] = useState<HairSubCat>('all');
+
+  // Custom upload modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [uploadingHair, setUploadingHair] = useState(false);
+  const [newHairName, setNewHairName] = useState('');
+  const [newHairCategory, setNewHairCategory] = useState<'short' | 'medium' | 'long' | 'updo'>('medium');
 
   const colors: HairColor[] = [
     { id: 'c-1', name: 'Jet Black', hex: '#1C1C1E' },
@@ -74,17 +89,85 @@ export default function HairstyleScreen() {
         setLatestPortrait(portraitData);
         session.ensureSession({ image_id: portraitData.image_id, url: portraitData.url });
       }
-      if (catData.items?.length > 0) setSelectedId(catData.items[0].item_id);
+      if (catData.items?.length > 0 && !selectedId) {
+        setSelectedId(catData.items[0].item_id);
+      }
     } catch (err: any) {
       setError(err.message || 'Could not load hairstyle catalogue.');
     } finally {
       setLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, session]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const handlePickImage = async (useCamera: boolean) => {
+    try {
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.8,
+      };
+
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        setUploadingHair(true);
+        const defaultName = `My ${newHairCategory.charAt(0).toUpperCase() + newHairCategory.slice(1)} Hair`;
+        const nameToUse = newHairName.trim() || defaultName;
+        const res = await api.catalogue.uploadHairstyle(
+          asset.uri,
+          nameToUse,
+          newHairCategory,
+          asset.mimeType || 'image/png'
+        );
+
+        setShowAddModal(false);
+        setNewHairName('');
+        Alert.alert('Hairstyle Added! ✨', `"${nameToUse}" has been added to your hairstyle catalogue.`);
+
+        await loadData();
+        setSelectedId(res.item_id);
+      }
+    } catch (err: any) {
+      Alert.alert('Upload Failed', err.message || 'Could not upload hairstyle photo.');
+    } finally {
+      setUploadingHair(false);
+    }
+  };
+
+  const handleDeleteHairstyle = (item: StyleItem) => {
+    Alert.alert('Remove Hairstyle', `Delete "${item.name}" from your hairstyle collection?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.catalogue.deleteItem(item.item_id);
+            if (selectedId === item.item_id) {
+              setSelectedId(null);
+            }
+            await loadData();
+            Alert.alert('Removed', `"${item.name}" has been deleted.`);
+          } catch (err: any) {
+            Alert.alert('Delete Failed', err.message || 'Could not delete hairstyle.');
+          }
+        },
+      },
+    ]);
+  };
+
+  // Filtered catalogue items
+  const filteredItems = items.filter((item) => {
+    if (subFilter === 'all') return true;
+    return (item.subcategory?.toLowerCase() || '') === subFilter;
+  });
 
   // Effective source image: latest chained result if a styling session is active
   const sourceImage = session.current ??
@@ -214,7 +297,34 @@ export default function HairstyleScreen() {
         </TouchableOpacity>
 
         {/* Hairstyle Selection Grid */}
-        <Text style={styles.sectionHeading}>2. Select Hairstyle</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionHeading}>2. Select Hairstyle</Text>
+          <TouchableOpacity
+            style={styles.addHairBtn}
+            onPress={() => setShowAddModal(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.addHairBtnText}>+ Upload Style</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Category Filter Pills */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          {(['all', 'short', 'medium', 'long', 'updo'] as const).map((key) => {
+            const active = subFilter === key;
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.pill, active && styles.pillActive]}
+                onPress={() => setSubFilter(key)}
+              >
+                <Text style={[styles.pillText, active && styles.pillTextActive]}>
+                  {key === 'all' ? '✦ All Styles' : `${HAIR_EMOJIS[key]} ${key.charAt(0).toUpperCase() + key.slice(1)}`}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
 
         {loading && (
           <View style={styles.loadingWrap}>
@@ -227,16 +337,16 @@ export default function HairstyleScreen() {
           <ErrorMessage message={error} onRetry={loadData} />
         )}
 
-        {!loading && !error && items.length === 0 && (
+        {!loading && !error && filteredItems.length === 0 && (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyIcon}>💇‍♀️</Text>
-            <Text style={styles.emptyText}>No hairstyles in catalogue yet.</Text>
+            <Text style={styles.emptyText}>No hairstyles in this category yet.</Text>
           </View>
         )}
 
-        {!loading && !error && items.length > 0 && (
+        {!loading && !error && filteredItems.length > 0 && (
           <View style={styles.stylesGrid}>
-            {items.map((hair) => {
+            {filteredItems.map((hair) => {
               const isSelected = selectedId === hair.item_id;
               const emoji = HAIR_EMOJIS[hair.subcategory ?? 'medium'] ?? '💇‍♀️';
               const photoUri = hair.thumbnail
@@ -244,6 +354,12 @@ export default function HairstyleScreen() {
                   ? hair.thumbnail
                   : `${baseUrl}${hair.thumbnail}`
                 : null;
+              const isCustom =
+                hair.item_id.includes('custom') ||
+                hair.tags?.includes('custom') ||
+                Boolean((hair as any).is_custom) ||
+                Boolean(hair.thumbnail?.includes('/uploads/hairstyles/'));
+
               return (
                 <TouchableOpacity
                   key={hair.item_id}
@@ -254,6 +370,19 @@ export default function HairstyleScreen() {
                     isSelected && styles.hairCardSelected,
                   ]}
                 >
+                  {isCustom && (
+                    <TouchableOpacity
+                      style={styles.deleteHairBtn}
+                      onPress={(e) => {
+                        e.stopPropagation?.();
+                        handleDeleteHairstyle(hair);
+                      }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Text style={styles.deleteHairText}>✕</Text>
+                    </TouchableOpacity>
+                  )}
+
                   {photoUri ? (
                     <Image source={{ uri: photoUri }} style={styles.hairPhoto} resizeMode="contain" />
                   ) : (
@@ -266,8 +395,8 @@ export default function HairstyleScreen() {
                   </Text>
                   {hair.subcategory && (
                     <Badge
-                      label={hair.subcategory.toUpperCase()}
-                      variant={isSelected ? 'primary' : 'muted'}
+                      label={isCustom ? `CUSTOM • ${hair.subcategory.toUpperCase()}` : hair.subcategory.toUpperCase()}
+                      variant={isCustom ? 'primary' : isSelected ? 'primary' : 'muted'}
                     />
                   )}
                 </TouchableOpacity>
@@ -310,6 +439,89 @@ export default function HairstyleScreen() {
           style={styles.actionBtn}
         />
       </ScrollView>
+
+      {/* Upload Hairstyle Modal */}
+      <Modal
+        visible={showAddModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => !uploadingHair && setShowAddModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>Upload Custom Hairstyle</Text>
+              <TouchableOpacity
+                onPress={() => setShowAddModal(false)}
+                disabled={uploadingHair}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSubtitle}>
+              Upload a hairstyle photograph, wig, or portrait. StyleVision will automatically isolate the hair texture and fit it to your head geometry.
+            </Text>
+
+            <Text style={styles.inputLabel}>Hairstyle Name (optional)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Honey Caramel Waves"
+              placeholderTextColor="#666"
+              value={newHairName}
+              onChangeText={setNewHairName}
+              editable={!uploadingHair}
+            />
+
+            <Text style={styles.inputLabel}>Hairstyle Length / Style</Text>
+            <View style={styles.modalCatRow}>
+              {(['short', 'medium', 'long', 'updo'] as const).map((cat) => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[
+                    styles.modalCatBtn,
+                    newHairCategory === cat && styles.modalCatBtnActive,
+                  ]}
+                  onPress={() => setNewHairCategory(cat)}
+                  disabled={uploadingHair}
+                >
+                  <Text
+                    style={[
+                      styles.modalCatText,
+                      newHairCategory === cat && styles.modalCatTextActive,
+                    ]}
+                  >
+                    {HAIR_EMOJIS[cat]} {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {uploadingHair ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+                <Text style={styles.modalLoadingText}>Isolating hair & removing background...</Text>
+              </View>
+            ) : (
+              <View style={styles.modalActions}>
+                <Button
+                  title="📸 Take Photo"
+                  variant="outline"
+                  onPress={() => handlePickImage(true)}
+                  style={styles.modalActionBtn}
+                />
+                <Button
+                  title="🖼️ From Gallery"
+                  variant="primary"
+                  onPress={() => handlePickImage(false)}
+                  style={styles.modalActionBtn}
+                />
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -317,35 +529,44 @@ export default function HairstyleScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: Colors.background},
+    backgroundColor: Colors.background,
+  },
   container: {
     flex: 1,
-    backgroundColor: Colors.background},
+    backgroundColor: Colors.background,
+  },
   content: {
     padding: Spacing.xl,
-    paddingBottom: Spacing.xxxl * 2},
+    paddingBottom: Spacing.xxxl * 2,
+  },
   engineCard: {
     backgroundColor: Colors.surface,
     padding: Spacing.md,
     marginBottom: Spacing.xl,
     borderWidth: 1,
-    borderColor: Colors.border},
+    borderColor: Colors.border,
+  },
   engineRow: {
     flexDirection: 'row',
-    alignItems: 'center'},
+    alignItems: 'center',
+  },
   engineIcon: {
     fontSize: 24,
-    marginRight: Spacing.md},
+    marginRight: Spacing.md,
+  },
   engineInfo: {
-    flex: 1},
+    flex: 1,
+  },
   engineTitle: {
     fontSize: Typography.sizes.sm,
     fontWeight: Typography.weights.bold,
-    color: Colors.textPrimary},
+    color: Colors.textPrimary,
+  },
   engineDesc: {
     fontSize: Typography.sizes.xs,
     color: Colors.textMuted,
-    marginTop: 2},
+    marginTop: 2,
+  },
   photoCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -355,37 +576,87 @@ const styles = StyleSheet.create({
     borderColor: Colors.primaryGlow,
     borderStyle: 'dashed',
     padding: Spacing.md,
-    marginBottom: Spacing.xl},
+    marginBottom: Spacing.xl,
+  },
   portraitRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md},
+    gap: Spacing.md,
+  },
   portraitThumb: {
     width: 52,
     height: 52,
     borderRadius: BorderRadius.md,
     borderWidth: 1.5,
-    borderColor: Colors.primary},
+    borderColor: Colors.primary,
+  },
   validatedBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginBottom: 2},
+    marginBottom: 2,
+  },
   photoIcon: { fontSize: 28, marginRight: Spacing.md },
   photoTextWrap: { flex: 1 },
   photoTitle: {
     fontSize: Typography.sizes.sm,
     fontWeight: Typography.weights.bold,
-    color: Colors.primaryLight},
+    color: Colors.primaryLight,
+  },
   photoDesc: { fontSize: Typography.sizes.xs, color: Colors.textMuted, marginTop: 2 },
   photoChevron: { fontSize: 20, color: Colors.primaryLight },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
+  },
   sectionHeading: {
     fontSize: Typography.sizes.sm,
     fontWeight: Typography.weights.bold,
     color: Colors.textSecondary,
-    marginBottom: Spacing.sm,
     textTransform: 'uppercase',
-    letterSpacing: 0.5},
+    letterSpacing: 0.5,
+  },
+  addHairBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.full,
+    backgroundColor: 'rgba(212, 175, 55, 0.15)',
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  addHairBtnText: {
+    fontSize: Typography.sizes.xs,
+    fontWeight: Typography.weights.bold,
+    color: Colors.primaryLight,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginBottom: Spacing.lg,
+  },
+  pill: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs + 2,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  pillActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  pillText: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textMuted,
+    fontWeight: Typography.weights.medium,
+  },
+  pillTextActive: {
+    color: '#0D0D12',
+    fontWeight: Typography.weights.bold,
+  },
   loadingWrap: { alignItems: 'center', paddingVertical: Spacing.xxl },
   loadingText: { color: Colors.textMuted, fontSize: Typography.sizes.xs, marginTop: Spacing.sm },
   emptyWrap: { alignItems: 'center', paddingVertical: Spacing.xxl },
@@ -395,7 +666,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    marginBottom: Spacing.xxl},
+    marginBottom: Spacing.xxl,
+  },
   hairCard: {
     width: '48%',
     backgroundColor: Colors.surfaceCard,
@@ -404,10 +676,31 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     borderWidth: 1.5,
     borderColor: Colors.border,
-    alignItems: 'center'},
+    alignItems: 'center',
+    position: 'relative',
+  },
   hairCardSelected: {
     borderColor: Colors.primary,
-    backgroundColor: Colors.primaryGlow},
+    backgroundColor: Colors.primaryGlow,
+  },
+  deleteHairBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FF3B30',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  deleteHairText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: 'bold',
+    lineHeight: 13,
+  },
   hairPhoto: {
     width: '100%',
     height: 90,
@@ -422,20 +715,24 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.sm},
+    marginBottom: Spacing.sm,
+  },
   hairEmoji: {
-    fontSize: 32},
+    fontSize: 32,
+  },
   hairName: {
     fontSize: Typography.sizes.xs,
     fontWeight: Typography.weights.bold,
     color: Colors.textPrimary,
     marginBottom: 4,
-    textAlign: 'center'},
+    textAlign: 'center',
+  },
   colorRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.sm,
-    marginBottom: Spacing.xxl},
+    marginBottom: Spacing.xxl,
+  },
   colorOption: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -444,22 +741,125 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: Colors.border},
+    borderColor: Colors.border,
+  },
   colorOptionSelected: {
     borderColor: Colors.primary,
-    backgroundColor: Colors.primaryGlow},
+    backgroundColor: Colors.primaryGlow,
+  },
   colorDot: {
     width: 14,
     height: 14,
     borderRadius: 7,
     marginRight: Spacing.sm,
     borderWidth: 1,
-    borderColor: '#FFFFFF44'},
+    borderColor: '#FFFFFF44',
+  },
   colorLabel: {
     fontSize: Typography.sizes.xs,
-    color: Colors.textMuted},
+    color: Colors.textMuted,
+  },
   colorLabelSelected: {
     color: Colors.primaryLight,
-    fontWeight: Typography.weights.bold},
+    fontWeight: Typography.weights.bold,
+  },
   actionBtn: {
-    marginTop: Spacing.sm}});
+    marginTop: Spacing.sm,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.lg,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: Colors.surfaceCard,
+    padding: Spacing.xl,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  modalTitle: {
+    fontSize: Typography.sizes.lg,
+    fontWeight: Typography.weights.bold,
+    color: Colors.textPrimary,
+  },
+  modalCloseText: {
+    fontSize: 18,
+    color: Colors.textMuted,
+    fontWeight: 'bold',
+  },
+  modalSubtitle: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textMuted,
+    marginBottom: Spacing.lg,
+    lineHeight: 18,
+  },
+  inputLabel: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textSecondary,
+    marginBottom: 4,
+    fontWeight: Typography.weights.medium,
+  },
+  input: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    color: Colors.textPrimary,
+    fontSize: Typography.sizes.sm,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: Spacing.md,
+  },
+  modalCatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: Spacing.lg,
+  },
+  modalCatBtn: {
+    paddingHorizontal: Spacing.sm + 4,
+    paddingVertical: 7,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalCatBtnActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  modalCatText: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textMuted,
+    fontWeight: Typography.weights.medium,
+  },
+  modalCatTextActive: {
+    color: '#0D0D12',
+    fontWeight: Typography.weights.bold,
+  },
+  modalLoading: {
+    alignItems: 'center',
+    paddingVertical: Spacing.lg,
+  },
+  modalLoadingText: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.textMuted,
+    marginTop: Spacing.sm,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
+  modalActionBtn: {
+    flex: 1,
+  },
+});
