@@ -92,6 +92,7 @@ def ops_from_docs(docs: List[dict]) -> List[dict]:
                         "style_item_id": meta.get("style_item_id"),
                         "color_hex": meta.get("color_hex"),
                         "style_name": meta.get("style_name"),
+                        "custom_image_url": meta.get("custom_image_url"),
                     },
                 }
             )
@@ -188,13 +189,16 @@ async def execute_single_op(current_img: Image.Image, op: dict) -> Optional[Imag
         if stage == "hairstyle":
             style_name = params.get("style_name")
             subcategory = None
-            if not style_name:
+            custom_url = params.get("custom_image_url")
+            if not style_name or not custom_url:
                 try:
                     db = get_database()
                     style_doc = await db["catalogue"].find_one({"item_id": params["style_item_id"]})
                     if style_doc:
                         style_name = style_doc.get("name")
                         subcategory = style_doc.get("subcategory")
+                        if not custom_url:
+                            custom_url = style_doc.get("thumbnail")
                 except Exception:
                     pass
             return synthesize_hairstyle_tryon(
@@ -202,6 +206,7 @@ async def execute_single_op(current_img: Image.Image, op: dict) -> Optional[Imag
                 style_item_id=params["style_item_id"],
                 color_hex=params.get("color_hex"),
                 subcategory=subcategory,
+                custom_image_url=custom_url,
             )[0]
         if stage == "outfit":
             info = await _resolve_garment_info(params["garment_id"], params.get("source") or "catalogue")

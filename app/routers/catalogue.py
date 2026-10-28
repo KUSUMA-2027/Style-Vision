@@ -19,6 +19,7 @@ from app.database import get_database
 from app.config import get_settings
 from app.utils.file_utils import validate_and_read_upload
 from app.services.accessory_service import _clean_accessory_background
+from app.services.hairstyle_service import _clean_hairstyle_background
 
 router = APIRouter(prefix="/api/v1/catalogue", tags=["Style Catalogue"])
 settings = get_settings()
@@ -158,6 +159,66 @@ async def upload_custom_accessory(
     return _doc_to_response(doc)
 
 
+@router.post(
+    "/upload-hairstyle",
+    response_model=StyleItemResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload your own hairstyle photograph",
+)
+async def upload_custom_hairstyle(
+    file: UploadFile = File(...),
+    name: str = Form("My Hairstyle"),
+    subcategory: str = Form("medium"),
+    color: Optional[str] = Form(None),
+):
+    """
+    Upload a photo of your own hairstyle (wig, portrait, or mannequin hairstyle).
+    Automatically validates image, removes background, hollows face window, and adds to catalogue.
+    """
+    raw_bytes, extension = await validate_and_read_upload(file)
+    hair_dir = os.path.join(settings.upload_dir, "hairstyles")
+    os.makedirs(hair_dir, exist_ok=True)
+
+    try:
+        raw_img = Image.open(io.BytesIO(raw_bytes))
+        clean_img = _clean_hairstyle_background(raw_img)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unable to process hairstyle image: {exc}",
+        )
+
+    safe_name = f"hair_{uuid.uuid4().hex[:10]}.png"
+    save_path = os.path.join(hair_dir, safe_name)
+    clean_img.save(save_path, format="PNG")
+    image_url = f"/uploads/hairstyles/{safe_name}"
+
+    item_id = f"item-hair-custom-{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc)
+    sub = subcategory.lower().strip()
+    if sub not in ("short", "medium", "long", "updo"):
+        sub = "medium"
+
+    doc = {
+        "item_id": item_id,
+        "name": name.strip(),
+        "category": "hairstyle",
+        "subcategory": sub,
+        "description": f"Custom user-uploaded {sub} hairstyle",
+        "thumbnail": image_url,
+        "tags": ["custom", sub],
+        "color": color or "#1C1C1E",
+        "is_active": True,
+        "is_custom": True,
+        "created_at": now,
+        "updated_at": None,
+    }
+    db = get_database()
+    await db["catalogue"].insert_one(doc)
+
+    return _doc_to_response(doc)
+
+
 @router.delete(
     "/{item_id}",
     summary="Remove a style item from the catalogue",
@@ -174,7 +235,14 @@ async def delete_catalogue_item(item_id: str):
         )
     thumb = item.get("thumbnail")
     if thumb and "uploads" in thumb:
-        file_path = os.path.join(settings.upload_dir, "accessories", os.path.basename(thumb))
+        rel_path = thumb.replace("/uploads/", "").lstrip("/\\")
+        file_path = os.path.join(settings.upload_dir, rel_path)
+        if not os.path.exists(file_path):
+            for subfolder in ["accessories", "hairstyles", "outfits"]:
+                cand = os.path.join(settings.upload_dir, subfolder, os.path.basename(thumb))
+                if os.path.exists(cand):
+                    file_path = cand
+                    break
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)

@@ -692,12 +692,14 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
 
     style_name = "Hairstyle Style Fit"
     subcategory = None
+    custom_image_url = None
     try:
         db = get_database()
         style_doc = await db["catalogue"].find_one({"item_id": request.style_item_id})
         if style_doc:
             style_name = style_doc.get("name") or style_name
             subcategory = style_doc.get("subcategory")
+            custom_image_url = style_doc.get("thumbnail")
     except Exception as exc:
         logger.warning("[Hairstyle] DB lookup skipped: %s", exc)
 
@@ -714,6 +716,7 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
                     "style_item_id": request.style_item_id,
                     "color_hex": request.color_hex,
                     "style_name": style_name,
+                    "custom_image_url": custom_image_url,
                 },
             })
             composite, final_id, result_url = await rebuild_and_register_chain(
@@ -732,6 +735,7 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
                 offset_x=request.offset_x,
                 offset_y=request.offset_y,
                 scale_override=request.scale,
+                custom_image_url=custom_image_url,
             )
             import os as _os
             tryon_id = _os.path.splitext(_os.path.basename(result_url))[0]
@@ -777,6 +781,7 @@ async def tryon_hairstyle(request: HairstyleTryOnRequest, current_user: dict = D
                     "style_item_id": request.style_item_id,
                     "style_name": style_name,
                     "color_hex": request.color_hex,
+                    "custom_image_url": custom_image_url,
                     "parent_url": source_url,
                 },
             )

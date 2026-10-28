@@ -71,8 +71,152 @@ def _detect_landmarks_two_stage(np_rgb: np.ndarray) -> Optional[Dict[int, np.nda
     return detect_face_landmarks(np_rgb)
 
 
-def _get_or_create_hair_asset(style_item_id: str, subcategory: Optional[str] = None) -> Image.Image:
+def _clean_hairstyle_background(img: Image.Image) -> Image.Image:
+    """
+    Cleans background and hollows face window from user-uploaded hairstyle photo.
+    Works for:
+    1. Already transparent PNG wigs (> 2% transparent alpha).
+    2. Portrait or model photo wearing the desired hairstyle (face/neck hollowed out).
+    3. Flat-lay wig or mannequin photo (background subtracted, central face oval hollowed).
+    """
+    img_rgba = img.convert("RGBA")
+    arr = np.array(img_rgba, dtype=np.float32)
+    h, w = arr.shape[:2]
+
+    # 1. Existing transparency
+    if (arr[:, :, 3] < 240).sum() > (h * w * 0.02):
+        coords = cv2.findNonZero((arr[:, :, 3] > 20).astype(np.uint8))
+        if coords is not None:
+            bx, by, bw, bh = cv2.boundingRect(coords)
+            pad = 2
+            x1 = max(0, bx - pad)
+            y1 = max(0, by - pad)
+            x2 = min(w, bx + bw + pad)
+            y2 = min(h, by + bh + pad)
+            return img_rgba.crop((x1, y1, x2, y2))
+        return img_rgba
+
+    # 2. Try face landmark detection
+    rgb = np.array(img.convert("RGB"))
+    landmarks = detect_face_landmarks(rgb)
+
+    if landmarks:
+        # Perimeter indices along jawline and forehead
+        face_contour_indices = [
+            10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152,
+            148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+        ]
+        face_pts = np.array([landmarks[idx] for idx in face_contour_indices if idx in landmarks], dtype=np.int32)
+
+        # Background detection via perimeter edge sampling
+        edge_pixels = []
+        step_w = max(1, w // 40)
+        step_h = max(1, h // 40)
+        for x in range(0, w, step_w):
+            edge_pixels.extend([rgb[0, x], rgb[1, x], rgb[-1, x], rgb[-2, x]])
+        for y in range(0, h, step_h):
+            edge_pixels.extend([rgb[y, 0], rgb[y, 1], rgb[y, -1], rgb[y, -2]])
+
+        edge_arr = np.array(edge_pixels)
+        bg_median = np.median(edge_arr, axis=0)
+        diff = np.sqrt(np.sum((rgb.astype(np.float32) - bg_median) ** 2, axis=-1))
+
+        hair_mask = np.where(diff > 25.0, 255, 0).astype(np.uint8)
+
+        # Hollow out face window
+        if len(face_pts) > 5:
+            cv2.fillPoly(hair_mask, [face_pts], 0)
+
+        # Hollow out neck / chest below chin
+        p_chin = landmarks.get(152)
+        p_left_ear = landmarks.get(234)
+        p_right_ear = landmarks.get(454)
+        if p_chin is not None and p_left_ear is not None and p_right_ear is not None:
+            chin_y = int(p_chin[1])
+            neck_box = np.array([
+                [int(p_left_ear[0] + 35), chin_y],
+                [int(p_right_ear[0] - 35), chin_y],
+                [int(p_right_ear[0] - 20), h],
+                [int(p_left_ear[0] + 20), h]
+            ], dtype=np.int32)
+            cv2.fillPoly(hair_mask, [neck_box], 0)
+
+        hair_mask = cv2.GaussianBlur(hair_mask, (5, 5), 1.5)
+        arr[:, :, 3] = hair_mask
+    else:
+        # No face detected (e.g. mannequin wig): perimeter edge subtraction
+        edge_pixels = []
+        step_w = max(1, w // 40)
+        step_h = max(1, h // 40)
+        for x in range(0, w, step_w):
+            edge_pixels.extend([rgb[0, x], rgb[1, x], rgb[-1, x], rgb[-2, x]])
+        for y in range(0, h, step_h):
+            edge_pixels.extend([rgb[y, 0], rgb[y, 1], rgb[y, -1], rgb[y, -2]])
+
+        edge_arr = np.array(edge_pixels)
+        bg_median = np.median(edge_arr, axis=0)
+        diff = np.sqrt(np.sum((rgb.astype(np.float32) - bg_median) ** 2, axis=-1))
+
+        hair_mask = np.where(diff > 28.0, 255, 0).astype(np.uint8)
+
+        # Hollow central face oval
+        center_x = w // 2
+        center_y = int(h * 0.45)
+        oval_w = int(w * 0.22)
+        oval_h = int(h * 0.28)
+        cv2.ellipse(hair_mask, (center_x, center_y), (oval_w, oval_h), 0, 0, 360, 0, -1)
+
+        hair_mask = cv2.GaussianBlur(hair_mask, (5, 5), 1.5)
+        arr[:, :, 3] = hair_mask
+
+    cleaned = Image.fromarray(arr.astype(np.uint8), "RGBA")
+    coords = cv2.findNonZero((arr[:, :, 3] > 20).astype(np.uint8))
+    if coords is not None:
+        bx, by, bw, bh = cv2.boundingRect(coords)
+        pad = 2
+        x1 = max(0, bx - pad)
+        y1 = max(0, by - pad)
+        x2 = min(w, bx + bw + pad)
+        y2 = min(h, by + bh + pad)
+        cleaned = cleaned.crop((x1, y1, x2, y2))
+
+    return cleaned
+
+
+def _get_or_create_hair_asset(
+    style_item_id: str,
+    subcategory: Optional[str] = None,
+    custom_image_url: Optional[str] = None,
+) -> Image.Image:
     """Retrieve hairstyle PNG asset or generate a procedural hairstyle alpha silhouette."""
+    # 1. Custom image url provided directly
+    if custom_image_url:
+        clean_path = custom_image_url.lstrip("/").replace("/", os.sep)
+        for cand in [
+            clean_path,
+            os.path.join(settings.upload_dir, os.path.basename(clean_path)),
+            os.path.join(settings.upload_dir, "hairstyles", os.path.basename(clean_path)),
+            os.path.join("uploads", "hairstyles", os.path.basename(clean_path)),
+        ]:
+            if os.path.exists(cand):
+                try:
+                    img = Image.open(cand)
+                    return _clean_hairstyle_background(img)
+                except Exception as exc:
+                    logger.warning("Failed to open custom hairstyle %s: %s", cand, exc)
+
+    # 2. Check if style_item_id is in uploads/hairstyles
+    hair_upload_dir = os.path.join(settings.upload_dir, "hairstyles")
+    if os.path.exists(hair_upload_dir):
+        for f in os.listdir(hair_upload_dir):
+            if style_item_id in f:
+                try:
+                    img = Image.open(os.path.join(hair_upload_dir, f))
+                    return _clean_hairstyle_background(img)
+                except Exception:
+                    pass
+
+    # 3. Check catalogue assets
     filename = (
         HAIRSTYLE_ASSET_MAP.get(style_item_id)
         or (HAIRSTYLE_ASSET_MAP.get(subcategory.lower()) if subcategory else None)
@@ -212,6 +356,7 @@ def synthesize_hairstyle_tryon(
     offset_x: Optional[float] = None,
     offset_y: Optional[float] = None,
     scale_override: Optional[float] = None,
+    custom_image_url: Optional[str] = None,
 ) -> Tuple[Image.Image, str, str, Optional[str], Optional[str]]:
     """
     Fit hairstyle matched to head orientation, skull proportions, and forehead/eyebrow anchor.
@@ -265,22 +410,36 @@ def synthesize_hairstyle_tryon(
         )
 
     # 1. Load hairstyle asset
-    hair_asset_pil = _get_or_create_hair_asset(style_item_id, subcategory)
+    hair_asset_pil = _get_or_create_hair_asset(style_item_id, subcategory, custom_image_url)
 
     # 2. Apply color tint if provided
     hair_asset_pil = _apply_hair_color(hair_asset_pil, color_hex)
     hair_rgba = np.array(hair_asset_pil)
 
     # 3. Determine style-specific geometry profile
-    filename = (
-        HAIRSTYLE_ASSET_MAP.get(style_item_id)
-        or (HAIRSTYLE_ASSET_MAP.get(subcategory.lower()) if subcategory else None)
-        or "beach_waves.png"
-    )
-    prof = HAIRSTYLE_PROFILES.get(
-        filename,
-        {"top_y": 354, "cx": 792.0, "cw": 420.0, "anchor": "hairline", "y_shift": -14}
-    )
+    is_custom = bool(custom_image_url or "custom" in style_item_id)
+    if is_custom:
+        alpha = hair_rgba[:, :, 3]
+        ys, xs = np.where(alpha > 30)
+        ah, aw = hair_rgba.shape[:2]
+        if len(xs) > 100:
+            top_y = float(np.min(ys))
+            cx = float(np.median(xs))
+            cw = float(np.max(xs) - np.min(xs)) * 0.75
+            prof = {"top_y": top_y, "cx": cx, "cw": max(150.0, cw), "anchor": "hairline", "y_shift": -10}
+        else:
+            prof = {"top_y": int(ah * 0.15), "cx": aw * 0.5, "cw": max(150.0, aw * 0.7), "anchor": "hairline", "y_shift": -10}
+        filename = "custom_hair.png"
+    else:
+        filename = (
+            HAIRSTYLE_ASSET_MAP.get(style_item_id)
+            or (HAIRSTYLE_ASSET_MAP.get(subcategory.lower()) if subcategory else None)
+            or "beach_waves.png"
+        )
+        prof = HAIRSTYLE_PROFILES.get(
+            filename,
+            {"top_y": 354, "cx": 792.0, "cw": 420.0, "anchor": "hairline", "y_shift": -14}
+        )
 
     # 4. Scale hairstyle dynamically to model's head cranial width
     ah, aw = hair_rgba.shape[:2]
