@@ -49,6 +49,26 @@ const HAIR_EMOJIS: Record<string, string> = {
   updo: '💇‍♀️',
 };
 
+const ALLOWED_DEFAULT_HAIRSTYLES = [
+  'beach waves',
+  'classic french bob',
+  'platinum blonde shag',
+  'sleek high ponytail',
+  'soft curls',
+];
+
+const isAllowedHairstyle = (item: StyleItem) => {
+  const isCustom =
+    item.item_id.includes('custom') ||
+    item.tags?.includes('custom') ||
+    Boolean((item as any).is_custom) ||
+    Boolean(item.thumbnail?.includes('/uploads/hairstyles/'));
+  if (isCustom) return true;
+
+  const nameLower = (item.name || '').trim().toLowerCase();
+  return ALLOWED_DEFAULT_HAIRSTYLES.some((allowed) => nameLower === allowed || nameLower.includes(allowed));
+};
+
 export default function HairstyleScreen() {
   const router = useRouter();
   const session = useStylingSession();
@@ -84,13 +104,15 @@ export default function HairstyleScreen() {
         api.catalogue.list('hairstyle'),
         api.upload.getLatest().catch(() => null),
       ]);
-      setItems(catData.items ?? []);
+      const rawItems: StyleItem[] = catData.items ?? [];
+      const curatedItems = rawItems.filter(isAllowedHairstyle);
+      setItems(curatedItems);
       if (portraitData) {
         setLatestPortrait(portraitData);
         session.ensureSession({ image_id: portraitData.image_id, url: portraitData.url });
       }
-      if (catData.items?.length > 0 && !selectedId) {
-        setSelectedId(catData.items[0].item_id);
+      if (curatedItems.length > 0 && !selectedId) {
+        setSelectedId(curatedItems[0].item_id);
       }
     } catch (err: any) {
       setError(err.message || 'Could not load hairstyle catalogue.');
@@ -163,11 +185,13 @@ export default function HairstyleScreen() {
     ]);
   };
 
-  // Filtered catalogue items
-  const filteredItems = items.filter((item) => {
-    if (subFilter === 'all') return true;
-    return (item.subcategory?.toLowerCase() || '') === subFilter;
-  });
+  // Filtered catalogue items: only keep the 5 curated styles + user custom uploads
+  const filteredItems = items
+    .filter(isAllowedHairstyle)
+    .filter((item) => {
+      if (subFilter === 'all') return true;
+      return (item.subcategory?.toLowerCase() || '') === subFilter;
+    });
 
   // Effective source image: latest chained result if a styling session is active
   const sourceImage = session.current ??
@@ -430,7 +454,7 @@ export default function HairstyleScreen() {
 
         {/* Action Button */}
         <Button
-          title={isProcessing ? 'Aligning Hairstyle Mesh...' : 'Explore Hairstyle Look 💇'}
+          title={isProcessing ? 'Styling Hairstyle Look...' : 'Explore Hairstyle Look 💇'}
           variant="primary"
           size="lg"
           loading={isProcessing}

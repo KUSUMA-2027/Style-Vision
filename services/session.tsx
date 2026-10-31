@@ -14,6 +14,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { api } from './api';
@@ -101,6 +102,10 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
   const [items, setItems] = useState<SessionItem[]>([]);
   const [selections, setSelections] = useState<Partial<Record<Stage, any>>>({});
 
+  const baseRef = useRef<PortraitRef | null>(null);
+  baseRef.current = base;
+  const isRestoringRef = useRef(false);
+
   const mapServerItem = (it: any): SessionItem | null => {
     if (!it?.image_id || !it?.stage) return null;
     return {
@@ -115,11 +120,12 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
   };
 
   /** Rebuild local session state (current image + items + stages) from the server. */
-  const applyServerSession = useCallback((data: any) => {
+  const applyServerSession = useCallback((data: any, fallbackBase?: PortraitRef | null) => {
     if (data?.current_image?.url && data?.current_image?.image_id) {
       setCurrent({ image_id: data.current_image.image_id, url: data.current_image.url });
-    } else if (base) {
-      setCurrent(base);
+    } else {
+      const fb = fallbackBase ?? baseRef.current;
+      if (fb) setCurrent(fb);
     }
     const serverItems: SessionItem[] = (data?.items ?? [])
       .map(mapServerItem)
@@ -153,24 +159,27 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
       }
     }
     setStages(builtStages);
-  }, [base]);
+  }, []);
 
   /** Fetch the authoritative session state from the backend. */
   const syncSession = useCallback(async () => {
-    if (!base?.image_id) return;
+    const curBase = baseRef.current;
+    if (!curBase?.image_id) return;
     try {
-      const res = await api.tryon.getSessionStages(base.image_id);
-      applyServerSession(res);
+      const res = await api.tryon.getSessionStages(curBase.image_id);
+      applyServerSession(res, curBase);
     } catch {
       // Offline or expired token — keep local state
     }
-  }, [base, applyServerSession]);
+  }, [applyServerSession]);
 
   /**
    * Restore an in-progress styling session from the server:
    * latest portrait → current image + live items rooted at that portrait.
    */
   const restoreFromServer = useCallback(async () => {
+    if (isRestoringRef.current) return;
+    isRestoringRef.current = true;
     try {
       const latest = await api.upload.getLatest();
       if (!latest?.image_id) {
@@ -178,18 +187,26 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
         return;
       }
       const restoredBase: PortraitRef = { image_id: latest.image_id, url: latest.url };
-      setBase(restoredBase);
+      setBase((prev) => {
+        if (prev?.image_id === restoredBase.image_id && prev?.url === restoredBase.url) {
+          return prev;
+        }
+        return restoredBase;
+      });
       try {
         const res = await api.tryon.getSessionStages(latest.image_id);
-        applyServerSession(res);
+        applyServerSession(res, restoredBase);
         // No applied items yet → current stays at the base portrait
-        if (!res?.current_image) setCurrent(restoredBase);
+        if (!res?.current_image) {
+          setCurrent((prev) => (prev?.image_id === restoredBase.image_id ? prev : restoredBase));
+        }
       } catch {
         setCurrent(restoredBase);
       }
     } catch {
       // Not authenticated yet or offline — start with an empty session
     } finally {
+      isRestoringRef.current = false;
       setReady(true);
     }
   }, [applyServerSession]);
@@ -210,12 +227,15 @@ export function StylingSessionProvider({ children }: { children: React.ReactNode
   /** If no session exists yet, adopt this portrait as the session base. */
   const ensureSession = useCallback(
     (portrait: PortraitRef) => {
-      if (!base) {
-        setBase(portrait);
-        setCurrent((prevCurrent) => prevCurrent ?? portrait);
-      }
+      setBase((prev) => {
+        if (!prev) {
+          setCurrent((prevCurrent) => prevCurrent ?? portrait);
+          return portrait;
+        }
+        return prev;
+      });
     },
-    [base]
+    []
   );
 
   const setSelection = useCallback((stage: Stage, selection: any) => {
